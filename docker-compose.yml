@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: litlx
+      POSTGRES_PASSWORD: litlx
+      POSTGRES_DB: litlx
+    ports:
+      - "5432:5432"
+    volumes:
+      - litlx-postgres:/var/lib/postgresql/data
+
+volumes:
+  litlx-postgres:
