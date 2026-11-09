@@ -15,7 +15,7 @@ import {
 import { Panel, PanelEyebrow, PanelTitle, Topbar } from "@/components/dashboard-ui";
 import { createBoardFn, deleteBoardFn, listBoardsFn } from "@/lib/tickets";
 
-export const Route = createFileRoute("/boards")({
+export const Route = createFileRoute("/boards/")({
   head: () => ({
     meta: [
       { title: "Boards — MSU Bookstore Analytics" },
