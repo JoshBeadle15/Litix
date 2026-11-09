@@ -1,11 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "bun install && bun run build"
+    "builder": "DOCKERFILE"
   },
   "deploy": {
-    "startCommand": "bun run db:migrate && bun run db:seed && bun run start",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
