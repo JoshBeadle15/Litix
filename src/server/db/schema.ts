@@ -5,6 +5,12 @@ export const priorityEnum = pgEnum("priority", ["low", "medium", "high", "urgent
 export const activityTypeEnum = pgEnum("activity_type", ["comment", "system"]);
 export const roleEnum = pgEnum("role", ["admin", "member"]);
 
+export const departments = pgTable("departments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const employees = pgTable("employees", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -13,6 +19,7 @@ export const employees = pgTable("employees", {
   color: text("color").notNull().default("var(--chart-1)"),
   role: roleEnum("role").notNull().default("member"),
   passwordHash: text("password_hash"),
+  departmentId: uuid("department_id").references(() => departments.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -84,7 +91,12 @@ export const cardActivityRelations = relations(cardActivity, ({ one }) => ({
   employee: one(employees, { fields: [cardActivity.employeeId], references: [employees.id] }),
 }));
 
-export const employeesRelations = relations(employees, ({ many }) => ({
+export const employeesRelations = relations(employees, ({ one, many }) => ({
   cards: many(cards),
   activity: many(cardActivity),
+  department: one(departments, { fields: [employees.departmentId], references: [departments.id] }),
+}));
+
+export const departmentsRelations = relations(departments, ({ many }) => ({
+  employees: many(employees),
 }));

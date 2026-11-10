@@ -38,6 +38,32 @@ export const listEmployeesFn = createServerFn({ method: "GET" }).handler(async (
   return svc.listEmployees();
 });
 
+export const listDepartmentsFn = createServerFn({ method: "GET" }).handler(async () => {
+  requireEmployee(await session());
+  return svc.listDepartments();
+});
+
+export const createDepartmentFn = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ name: z.string().min(1).max(60) }))
+  .handler(async ({ data }) => {
+    requireAdmin(await session());
+    return svc.createDepartment(data.name);
+  });
+
+export const renameDepartmentFn = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ departmentId: uuid, name: z.string().min(1).max(60) }))
+  .handler(async ({ data }) => {
+    requireAdmin(await session());
+    return svc.renameDepartment(data.departmentId, data.name);
+  });
+
+export const deleteDepartmentFn = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ departmentId: uuid }))
+  .handler(async ({ data }) => {
+    requireAdmin(await session());
+    return svc.deleteDepartment(data.departmentId);
+  });
+
 export const createEmployeeFn = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
@@ -46,6 +72,7 @@ export const createEmployeeFn = createServerFn({ method: "POST" })
       email: z.string().email().optional(),
       role: roleSchema,
       password: z.string().min(8),
+      departmentId: uuid.optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -63,6 +90,7 @@ export const updateEmployeeFn = createServerFn({ method: "POST" })
       email: z.string().email().nullable().optional(),
       role: roleSchema.optional(),
       newPassword: z.string().min(8).optional(),
+      departmentId: uuid.nullable().optional(),
     }),
   )
   .handler(async ({ data }) => {

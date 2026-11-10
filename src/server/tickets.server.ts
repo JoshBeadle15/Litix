@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "./db/client";
-import { boardColumns, boards, cardActivity, cards, employees } from "./db/schema";
+import { boardColumns, boards, cardActivity, cards, departments, employees } from "./db/schema";
 
 export type Priority = "low" | "medium" | "high" | "urgent";
 
@@ -84,11 +84,38 @@ const EMPLOYEE_PUBLIC_COLUMNS = {
   title: employees.title,
   color: employees.color,
   role: employees.role,
+  departmentId: employees.departmentId,
   createdAt: employees.createdAt,
 };
 
 export async function listEmployees() {
-  return db.select(EMPLOYEE_PUBLIC_COLUMNS).from(employees).orderBy(asc(employees.name));
+  return db
+    .select({ ...EMPLOYEE_PUBLIC_COLUMNS, departmentName: departments.name })
+    .from(employees)
+    .leftJoin(departments, eq(employees.departmentId, departments.id))
+    .orderBy(asc(employees.name));
+}
+
+export async function listDepartments() {
+  return db.select().from(departments).orderBy(asc(departments.name));
+}
+
+export async function createDepartment(name: string) {
+  const [row] = await db.insert(departments).values({ name }).returning();
+  return row;
+}
+
+export async function renameDepartment(id: string, name: string) {
+  const [row] = await db
+    .update(departments)
+    .set({ name })
+    .where(eq(departments.id, id))
+    .returning();
+  return row;
+}
+
+export async function deleteDepartment(id: string) {
+  await db.delete(departments).where(eq(departments.id, id));
 }
 
 export async function getEmployeeByEmail(email: string) {
@@ -291,6 +318,7 @@ export async function createEmployee(input: {
   email?: string;
   role: "admin" | "member";
   passwordHash?: string;
+  departmentId?: string;
 }) {
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)`.mapWith(Number) })
@@ -303,6 +331,7 @@ export async function createEmployee(input: {
       email: input.email,
       role: input.role,
       passwordHash: input.passwordHash,
+      departmentId: input.departmentId,
       color: COLOR_PALETTE[count % COLOR_PALETTE.length],
     })
     .returning(EMPLOYEE_PUBLIC_COLUMNS);
@@ -317,6 +346,7 @@ export async function updateEmployee(
     email?: string | null;
     role?: "admin" | "member";
     passwordHash?: string;
+    departmentId?: string | null;
   },
 ) {
   const [row] = await db

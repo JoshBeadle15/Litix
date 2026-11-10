@@ -2,7 +2,7 @@ import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { KeyRound, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Plus, Trash2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,9 +16,13 @@ import { Panel, PanelEyebrow, PanelTitle, Topbar } from "@/components/dashboard-
 import { UserMenu } from "@/components/user-menu";
 import { changePasswordFn, getCurrentUserFn, updateMyProfileFn } from "@/lib/auth";
 import {
+  createDepartmentFn,
   createEmployeeFn,
+  deleteDepartmentFn,
   deleteEmployeeFn,
+  listDepartmentsFn,
   listEmployeesFn,
+  renameDepartmentFn,
   updateEmployeeFn,
 } from "@/lib/tickets";
 
@@ -35,6 +39,10 @@ export const Route = createFileRoute("/settings")({
 });
 
 type Role = "admin" | "member";
+interface Department {
+  id: string;
+  name: string;
+}
 
 function SettingsPage() {
   const { user } = Route.useRouteContext();
@@ -45,6 +53,10 @@ function SettingsPage() {
   const createEmployee = useServerFn(createEmployeeFn);
   const updateEmployee = useServerFn(updateEmployeeFn);
   const deleteEmployee = useServerFn(deleteEmployeeFn);
+  const listDepartments = useServerFn(listDepartmentsFn);
+  const createDepartment = useServerFn(createDepartmentFn);
+  const renameDepartment = useServerFn(renameDepartmentFn);
+  const deleteDepartment = useServerFn(deleteDepartmentFn);
 
   const [addOpen, setAddOpen] = useState(false);
 
@@ -55,7 +67,18 @@ function SettingsPage() {
   });
   const employees = employeesQuery.data ?? [];
 
+  const departmentsQuery = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => listDepartments(),
+    enabled: isAdmin,
+  });
+  const departments = departmentsQuery.data ?? [];
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["employees"] });
+  const invalidateDepartments = () => {
+    queryClient.invalidateQueries({ queryKey: ["departments"] });
+    invalidate();
+  };
 
   const createMutation = useMutation({
     mutationFn: (input: {
@@ -64,6 +87,7 @@ function SettingsPage() {
       title?: string;
       role: Role;
       password: string;
+      departmentId?: string;
     }) => createEmployee({ data: input }),
     onSuccess: () => {
       invalidate();
@@ -76,9 +100,29 @@ function SettingsPage() {
     onSuccess: invalidate,
   });
 
+  const departmentMutation = useMutation({
+    mutationFn: (input: { employeeId: string; departmentId: string | null }) =>
+      updateEmployee({ data: input }),
+    onSuccess: invalidate,
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (employeeId: string) => deleteEmployee({ data: { employeeId } }),
     onSuccess: invalidate,
+  });
+
+  const createDepartmentMutation = useMutation({
+    mutationFn: (name: string) => createDepartment({ data: { name } }),
+    onSuccess: invalidateDepartments,
+  });
+  const renameDepartmentMutation = useMutation({
+    mutationFn: (input: { departmentId: string; name: string }) =>
+      renameDepartment({ data: input }),
+    onSuccess: invalidateDepartments,
+  });
+  const deleteDepartmentMutation = useMutation({
+    mutationFn: (departmentId: string) => deleteDepartment({ data: { departmentId } }),
+    onSuccess: invalidateDepartments,
   });
 
   return (
@@ -119,6 +163,24 @@ function SettingsPage() {
         </section>
 
         {isAdmin && (
+          <section className="mb-10 max-w-md">
+            <div className="mb-4">
+              <PanelEyebrow>Organization</PanelEyebrow>
+              <PanelTitle>Departments</PanelTitle>
+            </div>
+            <DepartmentsPanel
+              departments={departments}
+              onCreate={(name) => createDepartmentMutation.mutate(name)}
+              onRename={(departmentId, name) =>
+                renameDepartmentMutation.mutate({ departmentId, name })
+              }
+              onDelete={(departmentId) => deleteDepartmentMutation.mutate(departmentId)}
+              createPending={createDepartmentMutation.isPending}
+            />
+          </section>
+        )}
+
+        {isAdmin && (
           <section className="mb-10">
             <div className="mb-4 flex items-end justify-between">
               <div>
@@ -128,6 +190,7 @@ function SettingsPage() {
               <AddStaffDialog
                 open={addOpen}
                 onOpenChange={setAddOpen}
+                departments={departments}
                 pending={createMutation.isPending}
                 error={createMutation.error instanceof Error ? createMutation.error.message : null}
                 onCreate={(draft) => createMutation.mutate(draft)}
@@ -141,6 +204,7 @@ function SettingsPage() {
                     <th className="py-2.5 px-5 font-normal">Name</th>
                     <th className="py-2.5 px-5 font-normal">Email</th>
                     <th className="py-2.5 px-5 font-normal">Title</th>
+                    <th className="py-2.5 px-5 font-normal">Department</th>
                     <th className="py-2.5 px-5 font-normal">Role</th>
                     <th className="py-2.5 px-5 font-normal text-right">Actions</th>
                   </tr>
@@ -151,6 +215,25 @@ function SettingsPage() {
                       <td className="py-3 px-5">{e.name}</td>
                       <td className="py-3 px-5 text-muted-foreground">{e.email ?? "—"}</td>
                       <td className="py-3 px-5 text-muted-foreground">{e.title ?? "—"}</td>
+                      <td className="py-3 px-5">
+                        <select
+                          value={e.departmentId ?? ""}
+                          onChange={(ev) =>
+                            departmentMutation.mutate({
+                              employeeId: e.id,
+                              departmentId: ev.target.value || null,
+                            })
+                          }
+                          className="bg-surface border border-border rounded-sm px-2 h-8 text-[12px] focus:outline-none focus:border-border-strong"
+                        >
+                          <option value="">—</option>
+                          {departments.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="py-3 px-5">
                         <select
                           value={e.role}
@@ -194,10 +277,109 @@ function SettingsPage() {
   );
 }
 
+function DepartmentsPanel({
+  departments,
+  onCreate,
+  onRename,
+  onDelete,
+  createPending,
+}: {
+  departments: Department[];
+  onCreate: (name: string) => void;
+  onRename: (departmentId: string, name: string) => void;
+  onDelete: (departmentId: string) => void;
+  createPending: boolean;
+}) {
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    onCreate(newName.trim());
+    setNewName("");
+  };
+
+  return (
+    <Panel className="p-4">
+      {departments.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground mb-3">
+          No departments yet — add one below.
+        </p>
+      ) : (
+        <ul className="space-y-1.5 mb-3">
+          {departments.map((d) => (
+            <li
+              key={d.id}
+              className="flex items-center gap-2 bg-surface border border-border rounded-sm px-3 h-9"
+            >
+              {editingId === d.id ? (
+                <input
+                  autoFocus
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onBlur={() => {
+                    const trimmed = editDraft.trim();
+                    if (trimmed && trimmed !== d.name) onRename(d.id, trimmed);
+                    setEditingId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  className="flex-1 bg-transparent text-[13px] focus:outline-none"
+                />
+              ) : (
+                <button
+                  onClick={() => {
+                    setEditingId(d.id);
+                    setEditDraft(d.name);
+                  }}
+                  className="flex-1 text-left text-[13px] hover:text-primary"
+                >
+                  {d.name}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (confirm(`Delete "${d.name}"? Staff assigned to it will become unassigned.`)) {
+                    onDelete(d.id);
+                  }
+                }}
+                className="size-6 grid place-items-center rounded-sm text-muted-foreground hover:text-negative"
+                aria-label={`Delete ${d.name}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="New department name…"
+          className={fieldClass}
+        />
+        <button
+          type="submit"
+          disabled={createPending}
+          className="h-9 px-3 shrink-0 text-[11px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </form>
+    </Panel>
+  );
+}
+
 function AddStaffDialog({
   open,
   onOpenChange,
   onCreate,
+  departments,
   pending,
   error,
 }: {
@@ -209,7 +391,9 @@ function AddStaffDialog({
     title?: string;
     role: Role;
     password: string;
+    departmentId?: string;
   }) => void;
+  departments: Department[];
   pending: boolean;
   error: string | null;
 }) {
@@ -217,6 +401,7 @@ function AddStaffDialog({
   const [email, setEmail] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<Role>("member");
+  const [departmentId, setDepartmentId] = useState("");
   const [password, setPassword] = useState("");
 
   const reset = () => {
@@ -224,6 +409,7 @@ function AddStaffDialog({
     setEmail("");
     setTitle("");
     setRole("member");
+    setDepartmentId("");
     setPassword("");
   };
 
@@ -235,6 +421,7 @@ function AddStaffDialog({
       email: email.trim(),
       title: title.trim() || undefined,
       role,
+      departmentId: departmentId || undefined,
       password,
     });
   };
@@ -299,6 +486,20 @@ function AddStaffDialog({
               </select>
             </Field>
           </div>
+          <Field label="Department (optional)">
+            <select
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+              className={fieldClass}
+            >
+              <option value="">—</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Initial password (min 8 characters)">
             <input
               type="text"
