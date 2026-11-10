@@ -8,6 +8,13 @@
       "when": 1794260379173,
       "tag": "0000_slim_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794325996996,
+      "tag": "0001_familiar_kree",
+      "breakpoints": true
     }
   ]
 }

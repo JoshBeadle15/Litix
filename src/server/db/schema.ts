@@ -3,6 +3,7 @@ import { date, integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-o
 
 export const priorityEnum = pgEnum("priority", ["low", "medium", "high", "urgent"]);
 export const activityTypeEnum = pgEnum("activity_type", ["comment", "system"]);
+export const roleEnum = pgEnum("role", ["admin", "member"]);
 
 export const employees = pgTable("employees", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -10,6 +11,8 @@ export const employees = pgTable("employees", {
   email: text("email").unique(),
   title: text("title"),
   color: text("color").notNull().default("var(--chart-1)"),
+  role: roleEnum("role").notNull().default("member"),
+  passwordHash: text("password_hash"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

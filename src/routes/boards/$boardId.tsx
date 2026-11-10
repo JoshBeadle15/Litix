@@ -1,8 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, MoreHorizontal, Plus, Send, Trash2, UserPlus, X } from "lucide-react";
+import { ArrowLeft, MoreHorizontal, Plus, Send, Trash2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,13 +12,13 @@ import {
 } from "@/components/ui/dialog";
 import { Topbar } from "@/components/dashboard-ui";
 import { Avatar, PriorityBadge } from "@/components/board-ui";
+import { UserMenu } from "@/components/user-menu";
 import { PRIORITIES, PRIORITY_META, dueMeta, type Priority } from "@/lib/board-constants";
-import { loadCurrentEmployeeId, saveCurrentEmployeeId } from "@/lib/current-employee";
+import { getCurrentUserFn } from "@/lib/auth";
 import {
   addCommentFn,
   createCardFn,
   createColumnFn,
-  createEmployeeFn,
   deleteCardFn,
   deleteColumnFn,
   getBoardFn,
@@ -30,6 +30,11 @@ import {
 } from "@/lib/tickets";
 
 export const Route = createFileRoute("/boards/$boardId")({
+  beforeLoad: async () => {
+    const user = await getCurrentUserFn();
+    if (!user) throw redirect({ to: "/login" });
+    return { user };
+  },
   head: () => ({
     meta: [{ title: "Board — MSU Bookstore Analytics" }],
   }),
@@ -76,11 +81,12 @@ const EMPTY_CARDS: BoardCard[] = [];
 
 function BoardDetailPage() {
   const { boardId } = Route.useParams();
+  const { user } = Route.useRouteContext();
+  const isAdmin = user.role === "admin";
   const queryClient = useQueryClient();
 
   const getBoard = useServerFn(getBoardFn);
   const listEmployees = useServerFn(listEmployeesFn);
-  const createEmployee = useServerFn(createEmployeeFn);
   const createColumn = useServerFn(createColumnFn);
   const renameColumn = useServerFn(renameColumnFn);
   const deleteColumn = useServerFn(deleteColumnFn);
@@ -94,19 +100,9 @@ function BoardDetailPage() {
   });
   const employeesQuery = useQuery({ queryKey: ["employees"], queryFn: () => listEmployees() });
 
-  const [currentEmployeeId, setCurrentEmployeeIdState] = useState<string | null>(null);
-  useEffect(() => {
-    setCurrentEmployeeIdState(loadCurrentEmployeeId());
-  }, []);
-  const setCurrentEmployeeId = (id: string | null) => {
-    setCurrentEmployeeIdState(id);
-    saveCurrentEmployeeId(id);
-  };
-
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [addCardColumnId, setAddCardColumnId] = useState<string | null>(null);
   const [addColumnOpen, setAddColumnOpen] = useState(false);
-  const [addTeammateOpen, setAddTeammateOpen] = useState(false);
 
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -136,15 +132,6 @@ function BoardDetailPage() {
       setAddCardColumnId(null);
     },
   });
-  const createEmployeeMutation = useMutation({
-    mutationFn: (input: { name: string; title?: string }) => createEmployee({ data: input }),
-    onSuccess: (employee) => {
-      queryClient.invalidateQueries({ queryKey: ["employees"] });
-      setCurrentEmployeeId(employee.id);
-      setAddTeammateOpen(false);
-    },
-  });
-
   const moveCardMutation = useMutation({
     mutationFn: (input: { cardId: string; toColumnId: string; orderedCardIds: string[] }) =>
       moveCard({ data: input }),
@@ -255,29 +242,8 @@ function BoardDetailPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Acting as
-          </span>
-          <select
-            value={currentEmployeeId ?? ""}
-            onChange={(e) => setCurrentEmployeeId(e.target.value || null)}
-            className="bg-surface border border-border rounded-sm px-2.5 h-8 text-[12px] focus:outline-none focus:border-border-strong"
-          >
-            <option value="">Unidentified</option>
-            {employees.map((e: Employee) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => setAddTeammateOpen(true)}
-            className="size-8 grid place-items-center rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border-strong"
-            aria-label="Add teammate"
-          >
-            <UserPlus className="size-3.5" />
-          </button>
+        <div className="shrink-0">
+          <UserMenu user={user} />
         </div>
       </div>
 
@@ -291,6 +257,7 @@ function BoardDetailPage() {
                 key={col.id}
                 column={col}
                 cards={cardsByColumn.get(col.id) ?? []}
+                isAdmin={isAdmin}
                 draggingCardId={draggingCardId}
                 dropTarget={dropTarget}
                 onDragOverCard={(index) => setDropTarget({ columnId: col.id, index })}
@@ -326,13 +293,15 @@ function BoardDetailPage() {
               />
             ))}
 
-            <AddColumn
-              open={addColumnOpen}
-              onOpen={() => setAddColumnOpen(true)}
-              onClose={() => setAddColumnOpen(false)}
-              onSubmit={(name) => createColumnMutation.mutate(name)}
-              pending={createColumnMutation.isPending}
-            />
+            {isAdmin && (
+              <AddColumn
+                open={addColumnOpen}
+                onOpen={() => setAddColumnOpen(true)}
+                onClose={() => setAddColumnOpen(false)}
+                onSubmit={(name) => createColumnMutation.mutate(name)}
+                pending={createColumnMutation.isPending}
+              />
+            )}
           </div>
         )}
       </div>
@@ -341,18 +310,10 @@ function BoardDetailPage() {
         <CardDetailDialog
           card={activeCard}
           employees={employees}
-          currentEmployeeId={currentEmployeeId}
           boardId={boardId}
           onClose={() => setActiveCardId(null)}
         />
       )}
-
-      <AddTeammateDialog
-        open={addTeammateOpen}
-        onOpenChange={setAddTeammateOpen}
-        onCreate={(draft) => createEmployeeMutation.mutate(draft)}
-        pending={createEmployeeMutation.isPending}
-      />
     </div>
   );
 }
@@ -360,6 +321,7 @@ function BoardDetailPage() {
 function Column({
   column,
   cards,
+  isAdmin,
   draggingCardId,
   dropTarget,
   onDragOverCard,
@@ -378,6 +340,7 @@ function Column({
 }: {
   column: BoardColumn;
   cards: BoardCard[];
+  isAdmin: boolean;
   draggingCardId: string | null;
   dropTarget: DropTarget | null;
   onDragOverCard: (index: number) => void;
@@ -435,7 +398,7 @@ function Column({
       }}
     >
       <div className="px-3 pt-3 pb-2 flex items-center gap-2">
-        {editingName ? (
+        {editingName && isAdmin ? (
           <input
             autoFocus
             value={nameDraft}
@@ -450,41 +413,45 @@ function Column({
             }}
             className="flex-1 bg-card border border-border-strong rounded-sm px-2 h-7 text-[13px] focus:outline-none"
           />
-        ) : (
+        ) : isAdmin ? (
           <button
             onClick={() => setEditingName(true)}
             className="flex-1 text-left text-[13px] font-medium truncate hover:text-primary"
           >
             {column.name}
           </button>
+        ) : (
+          <span className="flex-1 text-[13px] font-medium truncate">{column.name}</span>
         )}
         <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
           {cards.length}
         </span>
-        <div className="relative">
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className="size-6 grid place-items-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-surface-2"
-          >
-            <MoreHorizontal className="size-3.5" />
-          </button>
-          {menuOpen && (
-            <div
-              className="absolute right-0 top-7 z-10 w-36 bg-popover border border-border-strong rounded-sm shadow-lg py-1"
-              onMouseLeave={() => setMenuOpen(false)}
+        {isAdmin && (
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className="size-6 grid place-items-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-surface-2"
             >
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete();
-                }}
-                className="w-full text-left px-3 py-1.5 text-[12px] text-negative hover:bg-surface-2 flex items-center gap-2"
+              <MoreHorizontal className="size-3.5" />
+            </button>
+            {menuOpen && (
+              <div
+                className="absolute right-0 top-7 z-10 w-36 bg-popover border border-border-strong rounded-sm shadow-lg py-1"
+                onMouseLeave={() => setMenuOpen(false)}
               >
-                <Trash2 className="size-3" /> Delete column
-              </button>
-            </div>
-          )}
-        </div>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDelete();
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-[12px] text-negative hover:bg-surface-2 flex items-center gap-2"
+                >
+                  <Trash2 className="size-3" /> Delete column
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-[60px]">
@@ -680,13 +647,11 @@ function AddColumn({
 function CardDetailDialog({
   card,
   employees,
-  currentEmployeeId,
   boardId,
   onClose,
 }: {
   card: BoardCard;
   employees: Employee[];
-  currentEmployeeId: string | null;
   boardId: string;
   onClose: () => void;
 }) {
@@ -725,10 +690,7 @@ function CardDetailDialog({
     },
   });
   const commentMutation = useMutation({
-    mutationFn: (message: string) =>
-      addComment({
-        data: { cardId: card.id, employeeId: currentEmployeeId ?? undefined, message },
-      }),
+    mutationFn: (message: string) => addComment({ data: { cardId: card.id, message } }),
     onSuccess: () => {
       setComment("");
       invalidateActivity();
@@ -869,11 +831,7 @@ function CardDetailDialog({
             <input
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder={
-                currentEmployeeId
-                  ? "Add a comment…"
-                  : "Add a comment (set 'Acting as' to attribute it)…"
-              }
+              placeholder="Add a comment…"
               className="flex-1 bg-surface border border-border rounded-sm px-3 h-9 text-[13px] focus:outline-none focus:border-border-strong"
             />
             <button
@@ -896,78 +854,6 @@ function CardDetailDialog({
             <Trash2 className="size-3.5" /> Delete ticket
           </button>
         </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AddTeammateDialog({
-  open,
-  onOpenChange,
-  onCreate,
-  pending,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onCreate: (draft: { name: string; title?: string }) => void;
-  pending: boolean;
-}) {
-  const [name, setName] = useState("");
-  const [title, setTitle] = useState("");
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    onCreate({ name: name.trim(), title: title.trim() || undefined });
-    setName("");
-    setTitle("");
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v);
-        if (!v) {
-          setName("");
-          setTitle("");
-        }
-      }}
-    >
-      <DialogContent className="bg-card border-border sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="font-display text-xl tracking-tight font-normal">
-            Add a teammate
-          </DialogTitle>
-          <DialogDescription>
-            They'll show up as an assignee option on this board.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
-          <FieldBlock label="Name">
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className={fieldClass}
-              required
-            />
-          </FieldBlock>
-          <FieldBlock label="Title (optional)">
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className={fieldClass}
-            />
-          </FieldBlock>
-          <button
-            type="submit"
-            disabled={pending}
-            className="h-9 px-4 text-[12px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
-          >
-            {pending ? "Adding…" : "Add teammate"}
-          </button>
-        </form>
       </DialogContent>
     </Dialog>
   );

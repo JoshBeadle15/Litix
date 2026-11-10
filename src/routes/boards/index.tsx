@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -13,9 +13,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Panel, PanelEyebrow, PanelTitle, Topbar } from "@/components/dashboard-ui";
+import { UserMenu } from "@/components/user-menu";
+import { getCurrentUserFn } from "@/lib/auth";
 import { createBoardFn, deleteBoardFn, listBoardsFn } from "@/lib/tickets";
 
 export const Route = createFileRoute("/boards/")({
+  beforeLoad: async () => {
+    const user = await getCurrentUserFn();
+    if (!user) throw redirect({ to: "/login" });
+    return { user };
+  },
   head: () => ({
     meta: [
       { title: "Boards — MSU Bookstore Analytics" },
@@ -31,6 +38,8 @@ export const Route = createFileRoute("/boards/")({
 type Template = "it" | "basic" | "blank";
 
 function BoardsIndexPage() {
+  const { user } = Route.useRouteContext();
+  const isAdmin = user.role === "admin";
   const queryClient = useQueryClient();
   const listBoards = useServerFn(listBoardsFn);
   const createBoard = useServerFn(createBoardFn);
@@ -78,12 +87,17 @@ function BoardsIndexPage() {
             </p>
           </div>
 
-          <NewBoardDialog
-            open={dialogOpen}
-            onOpenChange={setDialogOpen}
-            pending={createMutation.isPending}
-            onCreate={(draft) => createMutation.mutate(draft)}
-          />
+          <div className="flex items-center gap-4">
+            {isAdmin && (
+              <NewBoardDialog
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+                pending={createMutation.isPending}
+                onCreate={(draft) => createMutation.mutate(draft)}
+              />
+            )}
+            <UserMenu user={user} />
+          </div>
         </header>
 
         {boardsQuery.isLoading ? (
@@ -123,18 +137,22 @@ function BoardsIndexPage() {
                       </span>
                     </div>
                   </Link>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (confirm(`Delete "${b.name}"? This removes all its columns and cards.`)) {
-                        deleteMutation.mutate(b.id);
-                      }
-                    }}
-                    className="absolute top-4 right-4 size-7 grid place-items-center rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-negative hover:border-negative/40 border border-transparent transition-all"
-                    aria-label={`Delete ${b.name}`}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (
+                          confirm(`Delete "${b.name}"? This removes all its columns and cards.`)
+                        ) {
+                          deleteMutation.mutate(b.id);
+                        }
+                      }}
+                      className="absolute top-4 right-4 size-7 grid place-items-center rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-negative hover:border-negative/40 border border-transparent transition-all"
+                      aria-label={`Delete ${b.name}`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
                 </Panel>
               ))}
             </div>

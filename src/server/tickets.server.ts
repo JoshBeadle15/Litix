@@ -77,8 +77,28 @@ export async function getBoardDetail(boardId: string) {
   return { board, columns, cards: boardCards };
 }
 
+const EMPLOYEE_PUBLIC_COLUMNS = {
+  id: employees.id,
+  name: employees.name,
+  email: employees.email,
+  title: employees.title,
+  color: employees.color,
+  role: employees.role,
+  createdAt: employees.createdAt,
+};
+
 export async function listEmployees() {
-  return db.select().from(employees).orderBy(asc(employees.name));
+  return db.select(EMPLOYEE_PUBLIC_COLUMNS).from(employees).orderBy(asc(employees.name));
+}
+
+export async function getEmployeeByEmail(email: string) {
+  const [row] = await db.select().from(employees).where(eq(employees.email, email));
+  return row ?? null;
+}
+
+export async function getEmployeeById(id: string) {
+  const [row] = await db.select().from(employees).where(eq(employees.id, id));
+  return row ?? null;
 }
 
 export async function createColumn(boardId: string, name: string) {
@@ -257,14 +277,21 @@ export async function addComment(input: { cardId: string; employeeId?: string; m
   return row;
 }
 
-export async function createEmployee(input: { name: string; title?: string; email?: string }) {
-  const palette = [
-    "var(--chart-1)",
-    "var(--chart-2)",
-    "var(--chart-3)",
-    "var(--chart-4)",
-    "var(--chart-5)",
-  ];
+const COLOR_PALETTE = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
+
+export async function createEmployee(input: {
+  name: string;
+  title?: string;
+  email?: string;
+  role: "admin" | "member";
+  passwordHash?: string;
+}) {
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)`.mapWith(Number) })
     .from(employees);
@@ -274,8 +301,40 @@ export async function createEmployee(input: { name: string; title?: string; emai
       name: input.name,
       title: input.title,
       email: input.email,
-      color: palette[count % palette.length],
+      role: input.role,
+      passwordHash: input.passwordHash,
+      color: COLOR_PALETTE[count % COLOR_PALETTE.length],
     })
-    .returning();
+    .returning(EMPLOYEE_PUBLIC_COLUMNS);
   return row;
+}
+
+export async function updateEmployee(
+  id: string,
+  patch: {
+    name?: string;
+    title?: string | null;
+    email?: string | null;
+    role?: "admin" | "member";
+    passwordHash?: string;
+  },
+) {
+  const [row] = await db
+    .update(employees)
+    .set(patch)
+    .where(eq(employees.id, id))
+    .returning(EMPLOYEE_PUBLIC_COLUMNS);
+  return row;
+}
+
+export async function deleteEmployee(id: string) {
+  await db.delete(employees).where(eq(employees.id, id));
+}
+
+export async function countAdmins() {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)`.mapWith(Number) })
+    .from(employees)
+    .where(eq(employees.role, "admin"));
+  return count;
 }
