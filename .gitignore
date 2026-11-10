@@ -25,6 +25,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Claude Code local state
+.claude/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

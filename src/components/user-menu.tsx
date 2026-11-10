@@ -25,15 +25,13 @@ export function UserMenu({ user }: { user: { name: string; role: "admin" | "memb
           {user.role}
         </div>
       </div>
-      {user.role === "admin" && (
-        <Link
-          to="/settings"
-          className="size-8 grid place-items-center rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border-strong"
-          aria-label="Settings"
-        >
-          <SettingsIcon className="size-3.5" />
-        </Link>
-      )}
+      <Link
+        to="/settings"
+        className="size-8 grid place-items-center rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border-strong"
+        aria-label="Settings"
+      >
+        <SettingsIcon className="size-3.5" />
+      </Link>
       <button
         onClick={() => logoutMutation.mutate()}
         disabled={logoutMutation.isPending}

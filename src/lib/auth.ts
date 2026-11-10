@@ -35,6 +35,18 @@ export const logoutFn = createServerFn({ method: "POST" }).handler(async () => {
   return { success: true };
 });
 
+export const updateMyProfileFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    z.object({
+      name: z.string().min(1).max(80),
+      title: z.string().max(80).optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const session = requireEmployee(await getSessionEmployee(getRequestHeader("cookie")));
+    return svc.updateEmployee(session.id, { name: data.name, title: data.title || null });
+  });
+
 export const changePasswordFn = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({

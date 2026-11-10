@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Panel, PanelEyebrow, PanelTitle, Topbar } from "@/components/dashboard-ui";
 import { UserMenu } from "@/components/user-menu";
-import { changePasswordFn, getCurrentUserFn } from "@/lib/auth";
+import { changePasswordFn, getCurrentUserFn, updateMyProfileFn } from "@/lib/auth";
 import {
   createEmployeeFn,
   deleteEmployeeFn,
@@ -26,7 +26,6 @@ export const Route = createFileRoute("/settings")({
   beforeLoad: async () => {
     const user = await getCurrentUserFn();
     if (!user) throw redirect({ to: "/login" });
-    if (user.role !== "admin") throw redirect({ to: "/boards" });
     return { user };
   },
   head: () => ({
@@ -39,6 +38,7 @@ type Role = "admin" | "member";
 
 function SettingsPage() {
   const { user } = Route.useRouteContext();
+  const isAdmin = user.role === "admin";
   const queryClient = useQueryClient();
 
   const listEmployees = useServerFn(listEmployeesFn);
@@ -48,7 +48,11 @@ function SettingsPage() {
 
   const [addOpen, setAddOpen] = useState(false);
 
-  const employeesQuery = useQuery({ queryKey: ["employees"], queryFn: () => listEmployees() });
+  const employeesQuery = useQuery({
+    queryKey: ["employees"],
+    queryFn: () => listEmployees(),
+    enabled: isAdmin,
+  });
   const employees = employeesQuery.data ?? [];
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["employees"] });
@@ -89,93 +93,102 @@ function SettingsPage() {
         <header className="pt-8 pb-6 flex flex-wrap items-end gap-6 justify-between">
           <div>
             <div className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-              Team · Settings
+              Settings
             </div>
             <h1 className="mt-3 font-display text-5xl leading-[1.05] tracking-tight">
-              Staff & <em className="italic text-primary">roles</em>.
+              Your <em className="italic text-primary">account</em>.
             </h1>
             <p className="mt-3 text-sm text-muted-foreground max-w-lg">
-              Manage who has access and what they can do. Admins manage boards and staff; members
-              work the tickets.
+              {isAdmin
+                ? "Manage your own profile, plus who has access and what they can do."
+                : "Manage your profile and password."}
             </p>
           </div>
           <UserMenu user={user} />
         </header>
 
-        <section className="mb-10">
-          <div className="mb-4 flex items-end justify-between">
-            <div>
-              <PanelEyebrow>Staff</PanelEyebrow>
-              <PanelTitle>{employees.length} accounts</PanelTitle>
-            </div>
-            <AddStaffDialog
-              open={addOpen}
-              onOpenChange={setAddOpen}
-              pending={createMutation.isPending}
-              error={createMutation.error instanceof Error ? createMutation.error.message : null}
-              onCreate={(draft) => createMutation.mutate(draft)}
-            />
-          </div>
-
-          <Panel className="p-0 overflow-hidden">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <th className="py-2.5 px-5 font-normal">Name</th>
-                  <th className="py-2.5 px-5 font-normal">Email</th>
-                  <th className="py-2.5 px-5 font-normal">Title</th>
-                  <th className="py-2.5 px-5 font-normal">Role</th>
-                  <th className="py-2.5 px-5 font-normal text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {employees.map((e) => (
-                  <tr key={e.id}>
-                    <td className="py-3 px-5">{e.name}</td>
-                    <td className="py-3 px-5 text-muted-foreground">{e.email ?? "—"}</td>
-                    <td className="py-3 px-5 text-muted-foreground">{e.title ?? "—"}</td>
-                    <td className="py-3 px-5">
-                      <select
-                        value={e.role}
-                        onChange={(ev) =>
-                          roleMutation.mutate({ employeeId: e.id, role: ev.target.value as Role })
-                        }
-                        disabled={e.id === user.id}
-                        className="bg-surface border border-border rounded-sm px-2 h-8 text-[12px] focus:outline-none focus:border-border-strong disabled:opacity-50"
-                      >
-                        <option value="admin">Admin</option>
-                        <option value="member">Member</option>
-                      </select>
-                    </td>
-                    <td className="py-3 px-5 text-right">
-                      <button
-                        onClick={() => {
-                          if (e.id === user.id) return;
-                          if (confirm(`Remove ${e.name}'s account? This can't be undone.`)) {
-                            deleteMutation.mutate(e.id);
-                          }
-                        }}
-                        disabled={e.id === user.id}
-                        className="size-7 grid place-items-center rounded-sm text-muted-foreground hover:text-negative hover:border-negative/40 border border-transparent disabled:opacity-30 disabled:hover:text-muted-foreground"
-                        aria-label={`Remove ${e.name}`}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Panel>
-        </section>
-
-        <section className="max-w-md">
+        <section className="mb-10 max-w-md">
           <div className="mb-4">
             <PanelEyebrow>Your account</PanelEyebrow>
-            <PanelTitle>Change password</PanelTitle>
+            <PanelTitle>Profile & password</PanelTitle>
           </div>
-          <ChangePasswordPanel />
+          <div className="space-y-4">
+            <ProfilePanel user={user} />
+            <ChangePasswordPanel />
+          </div>
         </section>
+
+        {isAdmin && (
+          <section className="mb-10">
+            <div className="mb-4 flex items-end justify-between">
+              <div>
+                <PanelEyebrow>Staff</PanelEyebrow>
+                <PanelTitle>{employees.length} accounts</PanelTitle>
+              </div>
+              <AddStaffDialog
+                open={addOpen}
+                onOpenChange={setAddOpen}
+                pending={createMutation.isPending}
+                error={createMutation.error instanceof Error ? createMutation.error.message : null}
+                onCreate={(draft) => createMutation.mutate(draft)}
+              />
+            </div>
+
+            <Panel className="p-0 overflow-hidden">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <th className="py-2.5 px-5 font-normal">Name</th>
+                    <th className="py-2.5 px-5 font-normal">Email</th>
+                    <th className="py-2.5 px-5 font-normal">Title</th>
+                    <th className="py-2.5 px-5 font-normal">Role</th>
+                    <th className="py-2.5 px-5 font-normal text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {employees.map((e) => (
+                    <tr key={e.id}>
+                      <td className="py-3 px-5">{e.name}</td>
+                      <td className="py-3 px-5 text-muted-foreground">{e.email ?? "—"}</td>
+                      <td className="py-3 px-5 text-muted-foreground">{e.title ?? "—"}</td>
+                      <td className="py-3 px-5">
+                        <select
+                          value={e.role}
+                          onChange={(ev) =>
+                            roleMutation.mutate({
+                              employeeId: e.id,
+                              role: ev.target.value as Role,
+                            })
+                          }
+                          disabled={e.id === user.id}
+                          className="bg-surface border border-border rounded-sm px-2 h-8 text-[12px] focus:outline-none focus:border-border-strong disabled:opacity-50"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="member">Member</option>
+                        </select>
+                      </td>
+                      <td className="py-3 px-5 text-right">
+                        <button
+                          onClick={() => {
+                            if (e.id === user.id) return;
+                            if (confirm(`Remove ${e.name}'s account? This can't be undone.`)) {
+                              deleteMutation.mutate(e.id);
+                            }
+                          }}
+                          disabled={e.id === user.id}
+                          className="size-7 grid place-items-center rounded-sm text-muted-foreground hover:text-negative hover:border-negative/40 border border-transparent disabled:opacity-30 disabled:hover:text-muted-foreground"
+                          aria-label={`Remove ${e.name}`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Panel>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -309,6 +322,59 @@ function AddStaffDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ProfilePanel({ user }: { user: { name: string; title: string | null } }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const updateProfile = useServerFn(updateMyProfileFn);
+  const [name, setName] = useState(user.name);
+  const [title, setTitle] = useState(user.title ?? "");
+
+  const mutation = useMutation({
+    mutationFn: () => updateProfile({ data: { name: name.trim(), title: title.trim() } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      router.invalidate();
+    },
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    mutation.mutate();
+  };
+
+  return (
+    <Panel className="p-5">
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Name">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={fieldClass}
+            required
+          />
+        </Field>
+        <Field label="Title (optional)">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={fieldClass} />
+        </Field>
+        {mutation.isError && (
+          <p className="text-[12px] text-negative">
+            {mutation.error instanceof Error ? mutation.error.message : "Something went wrong."}
+          </p>
+        )}
+        {mutation.isSuccess && <p className="text-[12px] text-positive">Profile updated.</p>}
+        <button
+          type="submit"
+          disabled={mutation.isPending}
+          className="h-9 px-4 text-[12px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
+        >
+          {mutation.isPending ? "Saving…" : "Save profile"}
+        </button>
+      </form>
+    </Panel>
   );
 }
 
