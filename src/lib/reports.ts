@@ -7,9 +7,10 @@ import {
   SOURCES,
   type Granularity,
 } from "@/lib/mock-data";
+import type { ManufacturerUnitRow } from "@/lib/manufacturer-units";
 import type { SalesRow } from "@/lib/sales-import";
 
-export type ReportSource = "sales" | "marketing";
+export type ReportSource = "sales" | "marketing" | "units";
 
 export const SALES_DIMENSIONS = [
   { id: "date", label: "Date" },
@@ -19,6 +20,12 @@ export const SALES_DIMENSIONS = [
   { id: "paymentType", label: "Payment type" },
 ] as const;
 export type SalesDimension = (typeof SALES_DIMENSIONS)[number]["id"];
+
+export const UNITS_DIMENSIONS = [
+  { id: "manufacturer", label: "Manufacturer" },
+  { id: "item", label: "Item" },
+] as const;
+export type UnitsDimension = (typeof UNITS_DIMENSIONS)[number]["id"];
 
 export const MARKETING_DIMENSIONS = [
   { id: "date", label: "Date" },
@@ -139,6 +146,68 @@ export function runSalesReport(
     return groupSales(sales, (s) => s.paymentType || "Unknown", "Payment type");
   }
   return groupSales(sales, (s) => s.item || "Unknown item", "Item");
+}
+
+function groupUnits(
+  rows: ManufacturerUnitRow[],
+  keyFn: (r: ManufacturerUnitRow) => string,
+  groupLabel: string,
+): ReportResult {
+  const groups = new Map<
+    string,
+    { qty: number; cost: number; skus: Set<string>; onHand: number; backordered: number }
+  >();
+  rows.forEach((r) => {
+    const k = keyFn(r);
+    const g = groups.get(k) ?? {
+      qty: 0,
+      cost: 0,
+      skus: new Set<string>(),
+      onHand: 0,
+      backordered: 0,
+    };
+    g.qty += r.quantitySold;
+    g.cost += r.quantitySold * (r.cost ?? 0);
+    g.skus.add(r.sku);
+    g.onHand += r.onHand ?? 0;
+    g.backordered += r.ordersNotReceived ?? 0;
+    groups.set(k, g);
+  });
+
+  const rowsOut: ReportRow[] = Array.from(groups.entries()).map(([group, g]) => ({
+    group,
+    unitsSold: g.qty,
+    costOfGoods: round2(g.cost),
+    skuCount: g.skus.size,
+    onHand: g.onHand,
+    backordered: g.backordered,
+  }));
+
+  const columns: ReportColumn[] = [
+    { key: "group", label: groupLabel },
+    { key: "unitsSold", label: "Units Sold", numeric: true, format: num },
+    { key: "costOfGoods", label: "Cost of Goods", numeric: true, format: money },
+    { key: "skuCount", label: "SKUs", numeric: true, format: num },
+    { key: "onHand", label: "On Hand", numeric: true, format: num },
+    { key: "backordered", label: "Backordered", numeric: true, format: num },
+  ];
+
+  return {
+    columns,
+    rows: rowsOut,
+    primaryMetric: "unitsSold",
+    note: "This POS export has no sale price, so this shows units sold and cost of goods, not revenue. Import a revenue-bearing export to get true sales-dollar reporting here.",
+  };
+}
+
+export function runUnitsReport(
+  rows: ManufacturerUnitRow[],
+  dimension: UnitsDimension,
+): ReportResult {
+  if (dimension === "item") {
+    return groupUnits(rows, (r) => r.title || r.sku, "Item");
+  }
+  return groupUnits(rows, (r) => r.manufacturer, "Manufacturer");
 }
 
 export function runMarketingReport(

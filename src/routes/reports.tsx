@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Bookmark, Download, X } from "lucide-react";
+import { AlertTriangle, Bookmark, CheckCircle2, Download, Trash2, Upload, X } from "lucide-react";
 import {
   ChartTooltip,
   Panel,
@@ -24,6 +24,13 @@ import {
   Topbar,
 } from "@/components/dashboard-ui";
 import { GRANS, RANGES, type Granularity } from "@/lib/mock-data";
+import {
+  loadUnitsStore,
+  parseManufacturerUnitsReport,
+  saveUnitsStore,
+  type ManufacturerUnitRow,
+  type UnitsImportMeta,
+} from "@/lib/manufacturer-units";
 import { loadSalesStore, type SalesRow } from "@/lib/sales-import";
 import {
   downloadReportCSV,
@@ -31,13 +38,16 @@ import {
   MARKETING_DIMENSIONS,
   runMarketingReport,
   runSalesReport,
+  runUnitsReport,
   saveSavedReports,
   SALES_DIMENSIONS,
+  UNITS_DIMENSIONS,
   type MarketingDimension,
   type ReportResult,
   type ReportSource,
   type SalesDimension,
   type SavedReport,
+  type UnitsDimension,
 } from "@/lib/reports";
 
 export const Route = createFileRoute("/reports")({
@@ -56,6 +66,11 @@ export const Route = createFileRoute("/reports")({
 
 function ReportsPage() {
   const [sales, setSales] = useState<SalesRow[]>([]);
+  const [units, setUnits] = useState<ManufacturerUnitRow[]>([]);
+  const [unitsImportMeta, setUnitsImportMeta] = useState<UnitsImportMeta | null>(null);
+  const [unitsImportError, setUnitsImportError] = useState<string | null>(null);
+  const [unitsImportBusy, setUnitsImportBusy] = useState(false);
+  const unitsFileInputRef = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<ReportSource>("sales");
   const [dimension, setDimension] = useState<string>("manufacturer");
   const [granularity, setGranularity] = useState<Granularity>("day");
@@ -68,23 +83,75 @@ function ReportsPage() {
   useEffect(() => {
     setSales(loadSalesStore().rows);
     setSaved(loadSavedReports());
+    const unitsStore = loadUnitsStore();
+    setUnits(unitsStore.rows);
+    setUnitsImportMeta(unitsStore.lastImport);
   }, []);
 
-  const dimensions = source === "sales" ? SALES_DIMENSIONS : MARKETING_DIMENSIONS;
+  const dimensions =
+    source === "sales"
+      ? SALES_DIMENSIONS
+      : source === "units"
+        ? UNITS_DIMENSIONS
+        : MARKETING_DIMENSIONS;
   const rangeDays = RANGES.find((r) => r.id === rangeId)!.days;
 
   const result: ReportResult = useMemo(() => {
     if (source === "sales") {
       return runSalesReport(sales, dimension as SalesDimension, granularity);
     }
+    if (source === "units") {
+      return runUnitsReport(units, dimension as UnitsDimension);
+    }
     return runMarketingReport(dimension as MarketingDimension, rangeDays, granularity);
-  }, [source, dimension, granularity, rangeDays, sales]);
+  }, [source, dimension, granularity, rangeDays, sales, units]);
 
   const setSourceAndReset = (next: ReportSource) => {
     setSource(next);
-    setDimension(next === "sales" ? "date" : "channel");
-    setSortKey("revenue");
+    setDimension(next === "sales" ? "date" : next === "units" ? "manufacturer" : "channel");
+    setSortKey(next === "units" ? "unitsSold" : "revenue");
     setSortDir("desc");
+  };
+
+  const handleUnitsFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUnitsImportError(null);
+    setUnitsImportBusy(true);
+    try {
+      const parseResult = await parseManufacturerUnitsReport(file);
+      if (parseResult.rows.length === 0) {
+        setUnitsImportError(
+          "Couldn't read any rows from that file — make sure it's the POS's \"Item Sales by " +
+            'Manufacturer" export.' +
+            (parseResult.skippedExamples.length
+              ? " " + parseResult.skippedExamples.join("; ")
+              : ""),
+        );
+        return;
+      }
+      const meta: UnitsImportMeta = {
+        filename: file.name,
+        importedAt: new Date().toISOString(),
+        rowCount: parseResult.rows.length,
+        skippedCount: parseResult.skippedCount,
+      };
+      setUnits(parseResult.rows);
+      setUnitsImportMeta(meta);
+      saveUnitsStore({ rows: parseResult.rows, lastImport: meta });
+    } catch {
+      setUnitsImportError("Couldn't read that file. Make sure it's a CSV or Excel export.");
+    } finally {
+      setUnitsImportBusy(false);
+    }
+  };
+
+  const clearUnits = () => {
+    setUnits([]);
+    setUnitsImportMeta(null);
+    setUnitsImportError(null);
+    saveUnitsStore({ rows: [], lastImport: null });
   };
 
   const setDimensionAndReset = (next: string) => {
@@ -187,6 +254,7 @@ function ReportsPage() {
                 options={[
                   { id: "marketing", label: "Marketing" },
                   { id: "sales", label: "Sales" },
+                  { id: "units", label: "Units" },
                 ]}
                 layoutGroup="report-source"
               />
@@ -226,6 +294,33 @@ function ReportsPage() {
             )}
 
             <div className="ml-auto flex items-center gap-2">
+              {source === "units" && (
+                <>
+                  <input
+                    ref={unitsFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    className="hidden"
+                    onChange={handleUnitsFile}
+                  />
+                  <button
+                    onClick={() => unitsFileInputRef.current?.click()}
+                    disabled={unitsImportBusy}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-mono uppercase tracking-wider border border-border rounded-sm text-muted-foreground hover:text-foreground hover:border-border-strong disabled:opacity-50"
+                  >
+                    <Upload className="size-3.5" />
+                    {unitsImportBusy ? "Importing…" : units.length ? "Re-import" : "Import report"}
+                  </button>
+                  {units.length > 0 && (
+                    <button
+                      onClick={clearUnits}
+                      className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-mono uppercase tracking-wider border border-border rounded-sm text-muted-foreground hover:text-foreground hover:border-border-strong"
+                    >
+                      <Trash2 className="size-3.5" /> Clear data
+                    </button>
+                  )}
+                </>
+              )}
               {savingName !== null ? (
                 <>
                   <input
@@ -289,6 +384,25 @@ function ReportsPage() {
             </div>
           )}
 
+          {source === "units" && unitsImportError && (
+            <p className="mt-3 text-xs text-negative">{unitsImportError}</p>
+          )}
+          {source === "units" && !unitsImportError && unitsImportMeta && (
+            <div className="mt-3 flex flex-col gap-1">
+              <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <CheckCircle2 className="size-3 text-positive" />
+                Last import: {unitsImportMeta.filename} · {unitsImportMeta.rowCount} rows
+              </div>
+              {!!unitsImportMeta.skippedCount && (
+                <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-accent">
+                  <AlertTriangle className="size-3" />
+                  {unitsImportMeta.skippedCount} line
+                  {unitsImportMeta.skippedCount === 1 ? "" : "s"} skipped — unrecognized format
+                </div>
+              )}
+            </div>
+          )}
+
           {result.note && <p className="mt-3 text-[11px] text-muted-foreground">{result.note}</p>}
         </Panel>
 
@@ -306,6 +420,23 @@ function ReportsPage() {
             >
               Go to Sales
             </Link>
+          </Panel>
+        ) : source === "units" && units.length === 0 ? (
+          <Panel className="mt-6 p-16 flex flex-col items-center text-center gap-4">
+            <div>
+              <div className="font-display text-xl">No units report imported yet</div>
+              <p className="mt-1.5 text-sm text-muted-foreground max-w-sm">
+                Import your POS's "Item Sales by Manufacturer" export above — it's parsed
+                automatically, no column mapping needed.
+              </p>
+            </div>
+            <button
+              onClick={() => unitsFileInputRef.current?.click()}
+              disabled={unitsImportBusy}
+              className="inline-flex items-center gap-2 h-9 px-4 text-[12px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
+            >
+              <Upload className="size-3.5" /> {unitsImportBusy ? "Importing…" : "Import report"}
+            </button>
           </Panel>
         ) : (
           <section className="mt-6 space-y-6">
