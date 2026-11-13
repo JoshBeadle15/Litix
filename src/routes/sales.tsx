@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CheckCircle2, FileSpreadsheet, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, Trash2, Upload } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -162,15 +162,24 @@ function SalesPage() {
               here. Map the columns once; we remember the shape for next time.
             </p>
             {lastImport && (
-              <div className="mt-3 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                <CheckCircle2 className="size-3 text-positive" />
-                Last import: {lastImport.filename} · {fmtNum(lastImport.rowCount)} rows ·{" "}
-                {new Date(lastImport.importedAt).toLocaleString("en", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
+              <div className="mt-3 flex flex-col gap-1">
+                <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <CheckCircle2 className="size-3 text-positive" />
+                  Last import: {lastImport.filename} · {fmtNum(lastImport.rowCount)} rows ·{" "}
+                  {new Date(lastImport.importedAt).toLocaleString("en", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </div>
+                {!!lastImport.skippedCount && (
+                  <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-accent">
+                    <AlertTriangle className="size-3" />
+                    {fmtNum(lastImport.skippedCount)} row
+                    {lastImport.skippedCount === 1 ? "" : "s"} skipped — unreadable date or total
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -410,12 +419,31 @@ function ImportDialog({
     }
   };
 
+  const normalized = useMemo(
+    () => (parsed && mapping.date && mapping.total ? normalizeRows(parsed.rows, mapping) : null),
+    [parsed, mapping],
+  );
+
   const confirm = () => {
-    if (!parsed || !mapping.date || !mapping.total) return;
-    const rows = normalizeRows(parsed.rows, mapping);
+    if (!normalized) return;
+    if (normalized.rows.length === 0) {
+      setError(
+        "None of the rows could be read with this mapping — check that Date and Total point " +
+          "at the right columns." +
+          (normalized.skippedExamples.length
+            ? " For example: " + normalized.skippedExamples.join("; ")
+            : ""),
+      );
+      return;
+    }
     onImported(
-      rows,
-      { filename, importedAt: new Date().toISOString(), rowCount: rows.length },
+      normalized.rows,
+      {
+        filename,
+        importedAt: new Date().toISOString(),
+        rowCount: normalized.rows.length,
+        skippedCount: normalized.skippedCount,
+      },
       mode,
     );
     reset();
@@ -517,6 +545,38 @@ function ImportDialog({
                 {parsed.rows.length} rows found in {filename}.
               </p>
             </div>
+
+            {normalized && (
+              <div
+                className={
+                  "flex items-start gap-2 rounded-sm border px-3 py-2 text-[12px] " +
+                  (normalized.skippedCount > 0
+                    ? "border-accent/40 text-accent"
+                    : "border-positive/30 text-positive")
+                }
+              >
+                {normalized.skippedCount > 0 ? (
+                  <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="size-3.5 mt-0.5 shrink-0" />
+                )}
+                <div>
+                  <div>
+                    {normalized.rows.length} of {parsed.rows.length} rows ready to import
+                    {normalized.skippedCount > 0 &&
+                      ` — ${normalized.skippedCount} will be skipped (unreadable date or total)`}
+                    .
+                  </div>
+                  {normalized.skippedExamples.length > 0 && (
+                    <div className="mt-1 font-mono text-[10px] opacity-80">
+                      {normalized.skippedExamples.join(" · ")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {error && <p className="text-xs text-negative">{error}</p>}
 
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <div className="inline-flex border border-border rounded-sm bg-surface p-0.5">

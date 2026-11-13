@@ -99,23 +99,73 @@ function toNumber(value: unknown): number | null {
   return negative ? -n : n;
 }
 
+function isoFromParts(y: number, mo: number, d: number): string | null {
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * CSV cells have no native date type, so POS exports hand us plain strings in
+ * whatever format they feel like. `new Date(str)` alone is too unreliable for
+ * that (inconsistent across formats/browsers) — so common shapes are parsed
+ * explicitly first, falling back to native parsing only for anything else.
+ */
 function toISODate(value: unknown): string | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.toISOString().slice(0, 10);
   }
   const str = String(value ?? "").trim();
   if (!str) return null;
+
+  // YYYY-MM-DD or YYYY/MM/DD, optionally with a time suffix.
+  let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (m) return isoFromParts(Number(m[1]), Number(m[2]), Number(m[3]));
+
+  // M/D/YYYY, M-D-YYYY, or M/D/YY (US convention), optionally with a time suffix.
+  m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/);
+  if (m) {
+    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return isoFromParts(year, Number(m[1]), Number(m[2]));
+  }
+
+  // Fallback: native parsing handles things like "Jan 5, 2026".
   const d = new Date(str);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString().slice(0, 10);
 }
 
-export function normalizeRows(raw: Record<string, unknown>[], mapping: ColumnMapping): SalesRow[] {
+export interface NormalizeResult {
+  rows: SalesRow[];
+  skippedCount: number;
+  skippedExamples: string[];
+}
+
+export function normalizeRows(
+  raw: Record<string, unknown>[],
+  mapping: ColumnMapping,
+): NormalizeResult {
   const out: SalesRow[] = [];
+  const skippedExamples: string[] = [];
+  let skippedCount = 0;
+
   raw.forEach((r, i) => {
-    const date = mapping.date ? toISODate(r[mapping.date]) : null;
-    const total = mapping.total ? toNumber(r[mapping.total]) : null;
-    if (!date || total === null) return;
+    const rawDate = mapping.date ? r[mapping.date] : undefined;
+    const rawTotal = mapping.total ? r[mapping.total] : undefined;
+    const date = mapping.date ? toISODate(rawDate) : null;
+    const total = mapping.total ? toNumber(rawTotal) : null;
+
+    if (!date || total === null) {
+      skippedCount++;
+      if (skippedExamples.length < 3) {
+        const reason = !date
+          ? `unreadable date "${String(rawDate ?? "")}"`
+          : `unreadable total "${String(rawTotal ?? "")}"`;
+        skippedExamples.push(`Row ${i + 2}: ${reason}`);
+      }
+      return;
+    }
 
     const str = (key?: string) => {
       if (!key) return undefined;
@@ -135,13 +185,15 @@ export function normalizeRows(raw: Record<string, unknown>[], mapping: ColumnMap
       paymentType: str(mapping.paymentType),
     });
   });
-  return out;
+
+  return { rows: out, skippedCount, skippedExamples };
 }
 
 export interface ImportMeta {
   filename: string;
   importedAt: string;
   rowCount: number;
+  skippedCount?: number;
 }
 
 interface SalesStore {
