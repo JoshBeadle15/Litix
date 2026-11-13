@@ -56,8 +56,8 @@ export const Route = createFileRoute("/reports")({
 
 function ReportsPage() {
   const [sales, setSales] = useState<SalesRow[]>([]);
-  const [source, setSource] = useState<ReportSource>("marketing");
-  const [dimension, setDimension] = useState<string>("channel");
+  const [source, setSource] = useState<ReportSource>("sales");
+  const [dimension, setDimension] = useState<string>("manufacturer");
   const [granularity, setGranularity] = useState<Granularity>("day");
   const [rangeId, setRangeId] = useState<(typeof RANGES)[number]["id"]>("30d");
   const [sortKey, setSortKey] = useState("revenue");

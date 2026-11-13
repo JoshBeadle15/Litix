@@ -13,6 +13,7 @@ export type ReportSource = "sales" | "marketing";
 
 export const SALES_DIMENSIONS = [
   { id: "date", label: "Date" },
+  { id: "manufacturer", label: "Manufacturer" },
   { id: "category", label: "Category" },
   { id: "item", label: "Item" },
   { id: "paymentType", label: "Payment type" },
@@ -127,6 +128,9 @@ export function runSalesReport(
       return new Date(s).toLocaleDateString("en", { month: "short", day: "numeric" });
     };
     return groupSales(sales, (s) => bucketKey(s.date, granularity), "Date", fmt);
+  }
+  if (dimension === "manufacturer") {
+    return groupSales(sales, (s) => s.manufacturer || "Unknown manufacturer", "Manufacturer");
   }
   if (dimension === "category") {
     return groupSales(sales, (s) => s.category || "Uncategorized", "Category");

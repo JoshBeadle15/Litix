@@ -6,6 +6,7 @@ export interface SalesRow {
   orderId?: string;
   item?: string;
   category?: string;
+  manufacturer?: string;
   quantity?: number;
   total: number;
   paymentType?: string;
@@ -17,6 +18,7 @@ export type FieldKey =
   | "orderId"
   | "item"
   | "category"
+  | "manufacturer"
   | "quantity"
   | "paymentType";
 
@@ -38,6 +40,12 @@ export const FIELD_DEFS: FieldDef[] = [
   },
   { key: "item", label: "Item", required: false, guess: /item|product|description|sku|name/i },
   { key: "category", label: "Category", required: false, guess: /category|department|dept/i },
+  {
+    key: "manufacturer",
+    label: "Manufacturer",
+    required: false,
+    guess: /manufacturer|mfr|brand|publisher/i,
+  },
   { key: "quantity", label: "Quantity", required: false, guess: /qty|quantity|units/i },
   {
     key: "paymentType",
@@ -122,6 +130,7 @@ export function normalizeRows(raw: Record<string, unknown>[], mapping: ColumnMap
       orderId: str(mapping.orderId),
       item: str(mapping.item),
       category: str(mapping.category),
+      manufacturer: str(mapping.manufacturer),
       quantity: mapping.quantity ? (toNumber(r[mapping.quantity]) ?? undefined) : undefined,
       paymentType: str(mapping.paymentType),
     });
