@@ -33,10 +33,20 @@ import {
 } from "@/lib/manufacturer-units";
 import { loadSalesStore, type SalesRow } from "@/lib/sales-import";
 import {
+  loadTenderStore,
+  parseTenderSummaryReport,
+  saveTenderStore,
+  type DepartmentRevenueRow,
+  type TenderImportMeta,
+  type TenderTotalRow,
+} from "@/lib/tender-report";
+import {
   downloadReportCSV,
   loadSavedReports,
   MARKETING_DIMENSIONS,
+  REVENUE_DIMENSIONS,
   runMarketingReport,
+  runRevenueReport,
   runSalesReport,
   runUnitsReport,
   saveSavedReports,
@@ -45,6 +55,7 @@ import {
   type MarketingDimension,
   type ReportResult,
   type ReportSource,
+  type RevenueDimension,
   type SalesDimension,
   type SavedReport,
   type UnitsDimension,
@@ -71,6 +82,12 @@ function ReportsPage() {
   const [unitsImportError, setUnitsImportError] = useState<string | null>(null);
   const [unitsImportBusy, setUnitsImportBusy] = useState(false);
   const unitsFileInputRef = useRef<HTMLInputElement>(null);
+  const [tenderTotals, setTenderTotals] = useState<TenderTotalRow[]>([]);
+  const [departmentRows, setDepartmentRows] = useState<DepartmentRevenueRow[]>([]);
+  const [revenueImportMeta, setRevenueImportMeta] = useState<TenderImportMeta | null>(null);
+  const [revenueImportError, setRevenueImportError] = useState<string | null>(null);
+  const [revenueImportBusy, setRevenueImportBusy] = useState(false);
+  const revenueFileInputRef = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<ReportSource>("sales");
   const [dimension, setDimension] = useState<string>("manufacturer");
   const [granularity, setGranularity] = useState<Granularity>("day");
@@ -86,6 +103,10 @@ function ReportsPage() {
     const unitsStore = loadUnitsStore();
     setUnits(unitsStore.rows);
     setUnitsImportMeta(unitsStore.lastImport);
+    const tenderStore = loadTenderStore();
+    setTenderTotals(tenderStore.tenderTotals);
+    setDepartmentRows(tenderStore.departmentRows);
+    setRevenueImportMeta(tenderStore.lastImport);
   }, []);
 
   const dimensions =
@@ -93,7 +114,9 @@ function ReportsPage() {
       ? SALES_DIMENSIONS
       : source === "units"
         ? UNITS_DIMENSIONS
-        : MARKETING_DIMENSIONS;
+        : source === "revenue"
+          ? REVENUE_DIMENSIONS
+          : MARKETING_DIMENSIONS;
   const rangeDays = RANGES.find((r) => r.id === rangeId)!.days;
 
   const result: ReportResult = useMemo(() => {
@@ -103,14 +126,72 @@ function ReportsPage() {
     if (source === "units") {
       return runUnitsReport(units, dimension as UnitsDimension);
     }
+    if (source === "revenue") {
+      return runRevenueReport({ tenderTotals, departmentRows }, dimension as RevenueDimension);
+    }
     return runMarketingReport(dimension as MarketingDimension, rangeDays, granularity);
-  }, [source, dimension, granularity, rangeDays, sales, units]);
+  }, [source, dimension, granularity, rangeDays, sales, units, tenderTotals, departmentRows]);
 
   const setSourceAndReset = (next: ReportSource) => {
     setSource(next);
-    setDimension(next === "sales" ? "date" : next === "units" ? "manufacturer" : "channel");
-    setSortKey(next === "units" ? "unitsSold" : "revenue");
+    setDimension(
+      next === "sales"
+        ? "date"
+        : next === "units"
+          ? "manufacturer"
+          : next === "revenue"
+            ? "tender"
+            : "channel",
+    );
+    setSortKey(next === "units" ? "unitsSold" : next === "revenue" ? "net" : "revenue");
     setSortDir("desc");
+  };
+
+  const handleRevenueFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setRevenueImportError(null);
+    setRevenueImportBusy(true);
+    try {
+      const parseResult = await parseTenderSummaryReport(file);
+      if (parseResult.tenderTotals.length === 0) {
+        setRevenueImportError(
+          "Couldn't read any tender totals from that file — make sure it's the POS's " +
+            '"Sales by Tender - Summary" export.' +
+            (parseResult.skippedExamples.length
+              ? " " + parseResult.skippedExamples.join("; ")
+              : ""),
+        );
+        return;
+      }
+      const meta: TenderImportMeta = {
+        filename: file.name,
+        importedAt: new Date().toISOString(),
+        rowCount: parseResult.departmentRows.length,
+        skippedCount: parseResult.skippedCount,
+      };
+      setTenderTotals(parseResult.tenderTotals);
+      setDepartmentRows(parseResult.departmentRows);
+      setRevenueImportMeta(meta);
+      saveTenderStore({
+        tenderTotals: parseResult.tenderTotals,
+        departmentRows: parseResult.departmentRows,
+        lastImport: meta,
+      });
+    } catch {
+      setRevenueImportError("Couldn't read that file. Make sure it's a CSV or Excel export.");
+    } finally {
+      setRevenueImportBusy(false);
+    }
+  };
+
+  const clearRevenue = () => {
+    setTenderTotals([]);
+    setDepartmentRows([]);
+    setRevenueImportMeta(null);
+    setRevenueImportError(null);
+    saveTenderStore({ tenderTotals: [], departmentRows: [], lastImport: null });
   };
 
   const handleUnitsFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -255,6 +336,7 @@ function ReportsPage() {
                   { id: "marketing", label: "Marketing" },
                   { id: "sales", label: "Sales" },
                   { id: "units", label: "Units" },
+                  { id: "revenue", label: "Revenue" },
                 ]}
                 layoutGroup="report-source"
               />
@@ -314,6 +396,37 @@ function ReportsPage() {
                   {units.length > 0 && (
                     <button
                       onClick={clearUnits}
+                      className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-mono uppercase tracking-wider border border-border rounded-sm text-muted-foreground hover:text-foreground hover:border-border-strong"
+                    >
+                      <Trash2 className="size-3.5" /> Clear data
+                    </button>
+                  )}
+                </>
+              )}
+              {source === "revenue" && (
+                <>
+                  <input
+                    ref={revenueFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    className="hidden"
+                    onChange={handleRevenueFile}
+                  />
+                  <button
+                    onClick={() => revenueFileInputRef.current?.click()}
+                    disabled={revenueImportBusy}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-mono uppercase tracking-wider border border-border rounded-sm text-muted-foreground hover:text-foreground hover:border-border-strong disabled:opacity-50"
+                  >
+                    <Upload className="size-3.5" />
+                    {revenueImportBusy
+                      ? "Importing…"
+                      : tenderTotals.length
+                        ? "Re-import"
+                        : "Import report"}
+                  </button>
+                  {tenderTotals.length > 0 && (
+                    <button
+                      onClick={clearRevenue}
                       className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-mono uppercase tracking-wider border border-border rounded-sm text-muted-foreground hover:text-foreground hover:border-border-strong"
                     >
                       <Trash2 className="size-3.5" /> Clear data
@@ -403,6 +516,26 @@ function ReportsPage() {
             </div>
           )}
 
+          {source === "revenue" && revenueImportError && (
+            <p className="mt-3 text-xs text-negative">{revenueImportError}</p>
+          )}
+          {source === "revenue" && !revenueImportError && revenueImportMeta && (
+            <div className="mt-3 flex flex-col gap-1">
+              <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <CheckCircle2 className="size-3 text-positive" />
+                Last import: {revenueImportMeta.filename} · {revenueImportMeta.rowCount} department
+                lines · {tenderTotals.length} tender types
+              </div>
+              {!!revenueImportMeta.skippedCount && (
+                <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-accent">
+                  <AlertTriangle className="size-3" />
+                  {revenueImportMeta.skippedCount} line
+                  {revenueImportMeta.skippedCount === 1 ? "" : "s"} skipped — unrecognized format
+                </div>
+              )}
+            </div>
+          )}
+
           {result.note && <p className="mt-3 text-[11px] text-muted-foreground">{result.note}</p>}
         </Panel>
 
@@ -436,6 +569,23 @@ function ReportsPage() {
               className="inline-flex items-center gap-2 h-9 px-4 text-[12px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
             >
               <Upload className="size-3.5" /> {unitsImportBusy ? "Importing…" : "Import report"}
+            </button>
+          </Panel>
+        ) : source === "revenue" && tenderTotals.length === 0 ? (
+          <Panel className="mt-6 p-16 flex flex-col items-center text-center gap-4">
+            <div>
+              <div className="font-display text-xl">No revenue report imported yet</div>
+              <p className="mt-1.5 text-sm text-muted-foreground max-w-sm">
+                Import your POS's "Sales by Tender - Summary" export above — it's parsed
+                automatically, no column mapping needed.
+              </p>
+            </div>
+            <button
+              onClick={() => revenueFileInputRef.current?.click()}
+              disabled={revenueImportBusy}
+              className="inline-flex items-center gap-2 h-9 px-4 text-[12px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
+            >
+              <Upload className="size-3.5" /> {revenueImportBusy ? "Importing…" : "Import report"}
             </button>
           </Panel>
         ) : (

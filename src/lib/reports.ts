@@ -9,8 +9,9 @@ import {
 } from "@/lib/mock-data";
 import type { ManufacturerUnitRow } from "@/lib/manufacturer-units";
 import type { SalesRow } from "@/lib/sales-import";
+import type { DepartmentRevenueRow, TenderTotalRow } from "@/lib/tender-report";
 
-export type ReportSource = "sales" | "marketing" | "units";
+export type ReportSource = "sales" | "marketing" | "units" | "revenue";
 
 export const SALES_DIMENSIONS = [
   { id: "date", label: "Date" },
@@ -26,6 +27,12 @@ export const UNITS_DIMENSIONS = [
   { id: "item", label: "Item" },
 ] as const;
 export type UnitsDimension = (typeof UNITS_DIMENSIONS)[number]["id"];
+
+export const REVENUE_DIMENSIONS = [
+  { id: "tender", label: "Tender Type" },
+  { id: "department", label: "Department" },
+] as const;
+export type RevenueDimension = (typeof REVENUE_DIMENSIONS)[number]["id"];
 
 export const MARKETING_DIMENSIONS = [
   { id: "date", label: "Date" },
@@ -208,6 +215,73 @@ export function runUnitsReport(
     return groupUnits(rows, (r) => r.title || r.sku, "Item");
   }
   return groupUnits(rows, (r) => r.manufacturer, "Manufacturer");
+}
+
+interface RevenueFigures {
+  gross: number;
+  saleQty: number;
+  refund: number;
+  refQty: number;
+  discount: number;
+  net: number;
+}
+
+function groupRevenue<T extends RevenueFigures>(
+  figures: T[],
+  keyFn: (r: T) => string,
+  groupLabel: string,
+  note?: string,
+): ReportResult {
+  const groups = new Map<string, RevenueFigures>();
+
+  figures.forEach((r) => {
+    const k = keyFn(r);
+    const g = groups.get(k) ?? { gross: 0, saleQty: 0, refund: 0, refQty: 0, discount: 0, net: 0 };
+    g.gross += r.gross;
+    g.saleQty += r.saleQty;
+    g.refund += r.refund;
+    g.refQty += r.refQty;
+    g.discount += r.discount;
+    g.net += r.net;
+    groups.set(k, g);
+  });
+
+  const rows: ReportRow[] = Array.from(groups.entries()).map(([group, g]) => ({
+    group,
+    gross: round2(g.gross),
+    saleQty: g.saleQty,
+    refund: round2(g.refund),
+    refQty: g.refQty,
+    discount: round2(g.discount),
+    net: round2(g.net),
+  }));
+
+  const columns: ReportColumn[] = [
+    { key: "group", label: groupLabel },
+    { key: "gross", label: "Gross", numeric: true, format: money },
+    { key: "saleQty", label: "Sale Qty", numeric: true, format: num },
+    { key: "refund", label: "Refund", numeric: true, format: money },
+    { key: "refQty", label: "Ref Qty", numeric: true, format: num },
+    { key: "discount", label: "Discount", numeric: true, format: money },
+    { key: "net", label: "Net", numeric: true, format: money },
+  ];
+
+  return { columns, rows, primaryMetric: "net", note };
+}
+
+export function runRevenueReport(
+  data: { tenderTotals: TenderTotalRow[]; departmentRows: DepartmentRevenueRow[] },
+  dimension: RevenueDimension,
+): ReportResult {
+  if (dimension === "department") {
+    return groupRevenue(
+      data.departmentRows,
+      (r) => r.department,
+      "Department",
+      "Department totals are summed across all tenders and exclude tax and buyback lines.",
+    );
+  }
+  return groupRevenue(data.tenderTotals, (r) => r.tender, "Tender Type");
 }
 
 export function runMarketingReport(
