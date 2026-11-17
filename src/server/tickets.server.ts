@@ -11,7 +11,19 @@ const TEMPLATE_COLUMNS: Record<"it" | "basic" | "blank", string[]> = {
 };
 
 export async function listBoards() {
-  const rows = await db.select().from(boards).orderBy(asc(boards.createdAt));
+  const rows = await db
+    .select({
+      id: boards.id,
+      name: boards.name,
+      description: boards.description,
+      kind: boards.kind,
+      departmentId: boards.departmentId,
+      departmentName: departments.name,
+      createdAt: boards.createdAt,
+    })
+    .from(boards)
+    .leftJoin(departments, eq(boards.departmentId, departments.id))
+    .orderBy(asc(boards.createdAt));
   const counts = await db
     .select({ boardId: cards.boardId, count: sql<number>`count(*)`.mapWith(Number) })
     .from(cards)
@@ -24,10 +36,17 @@ export async function createBoard(input: {
   name: string;
   description?: string;
   template: "it" | "basic" | "blank";
+  kind: "marketing" | "ticketing";
+  departmentId?: string;
 }) {
   const [board] = await db
     .insert(boards)
-    .values({ name: input.name, description: input.description })
+    .values({
+      name: input.name,
+      description: input.description,
+      kind: input.kind,
+      departmentId: input.kind === "ticketing" ? input.departmentId : undefined,
+    })
     .returning();
 
   const columnNames = TEMPLATE_COLUMNS[input.template];

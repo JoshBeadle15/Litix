@@ -18,7 +18,6 @@ const nav = [
   { label: "Sales", to: "/sales", icon: ShoppingBag },
   { label: "Audience", to: "/audience", icon: Users },
   { label: "Reports", to: "/reports", icon: FileBarChart },
-  { label: "Boards", to: "/boards", icon: Trello },
 ];
 
 const lower = [
@@ -28,6 +27,7 @@ const lower = [
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const boardsActive = pathname.startsWith("/boards");
 
   return (
     <aside className="hidden lg:flex w-[232px] shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
@@ -46,6 +46,20 @@ export function AppSidebar() {
       </div>
 
       <nav className="px-3 flex-1">
+        <Link
+          to="/boards"
+          className={
+            "group mb-6 flex items-center gap-3 rounded-sm px-3 py-2.5 text-[13px] border transition-colors " +
+            (boardsActive
+              ? "border-primary bg-primary/15 text-white"
+              : "border-primary/30 bg-primary/5 text-accent hover:bg-primary/15 hover:border-primary/50 hover:text-white")
+          }
+        >
+          <Trello className="size-4" strokeWidth={1.5} />
+          <span className="font-medium">Boards</span>
+          <span className="ml-auto size-1.5 rounded-full bg-primary" />
+        </Link>
+
         <SectionLabel>Workspace</SectionLabel>
         <ul className="space-y-0.5 mb-6">
           {nav.map((item) => {
