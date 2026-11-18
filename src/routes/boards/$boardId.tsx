@@ -311,6 +311,7 @@ function BoardDetailPage() {
           card={activeCard}
           employees={employees}
           boardId={boardId}
+          isAdmin={isAdmin}
           onClose={() => setActiveCardId(null)}
         />
       )}
@@ -648,11 +649,13 @@ function CardDetailDialog({
   card,
   employees,
   boardId,
+  isAdmin,
   onClose,
 }: {
   card: BoardCard;
   employees: Employee[];
   boardId: string;
+  isAdmin: boolean;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -844,16 +847,19 @@ function CardDetailDialog({
           </form>
         </div>
 
-        <div className="pt-2 border-t border-border flex justify-end">
-          <button
-            onClick={() => {
-              if (confirm(`Delete "${card.title}"? This can't be undone.`)) deleteMutation.mutate();
-            }}
-            className="inline-flex items-center gap-1.5 h-8 px-3 text-[11px] font-mono uppercase tracking-wider text-negative border border-negative/30 rounded-sm hover:bg-negative hover:text-white"
-          >
-            <Trash2 className="size-3.5" /> Delete ticket
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="pt-2 border-t border-border flex justify-end">
+            <button
+              onClick={() => {
+                if (confirm(`Delete "${card.title}"? This can't be undone.`))
+                  deleteMutation.mutate();
+              }}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-[11px] font-mono uppercase tracking-wider text-negative border border-negative/30 rounded-sm hover:bg-negative hover:text-white"
+            >
+              <Trash2 className="size-3.5" /> Delete ticket
+            </button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

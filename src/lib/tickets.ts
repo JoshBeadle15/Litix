@@ -223,7 +223,7 @@ export const moveCardFn = createServerFn({ method: "POST" })
 export const deleteCardFn = createServerFn({ method: "POST" })
   .inputValidator(z.object({ cardId: uuid }))
   .handler(async ({ data }) => {
-    requireEmployee(await session());
+    requireAdmin(await session());
     return svc.deleteCard(data.cardId);
   });
 

@@ -45,7 +45,7 @@ export async function createBoard(input: {
       name: input.name,
       description: input.description,
       kind: input.kind,
-      departmentId: input.kind === "ticketing" ? input.departmentId : undefined,
+      departmentId: input.departmentId,
     })
     .returning();
 

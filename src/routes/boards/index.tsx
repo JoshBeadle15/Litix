@@ -3,7 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 import { z } from "zod";
-import { Megaphone, Plus, Ticket, Trash2, Trello } from "lucide-react";
+import { Check, Megaphone, Plus, Ticket, Trash2, Trello, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +22,13 @@ import {
 } from "@/components/dashboard-ui";
 import { UserMenu } from "@/components/user-menu";
 import { getCurrentUserFn } from "@/lib/auth";
-import { createBoardFn, deleteBoardFn, listBoardsFn, listDepartmentsFn } from "@/lib/tickets";
+import {
+  createBoardFn,
+  createDepartmentFn,
+  deleteBoardFn,
+  listBoardsFn,
+  listDepartmentsFn,
+} from "@/lib/tickets";
 
 const searchSchema = z.object({
   tab: z.enum(["marketing", "ticketing"]).optional(),
@@ -72,6 +78,7 @@ function BoardsIndexPage() {
   const listBoards = useServerFn(listBoardsFn);
   const listDepartments = useServerFn(listDepartmentsFn);
   const createBoard = useServerFn(createBoardFn);
+  const createDepartment = useServerFn(createDepartmentFn);
   const deleteBoard = useServerFn(deleteBoardFn);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
@@ -101,13 +108,17 @@ function BoardsIndexPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["boards"] }),
   });
 
+  const createDepartmentMutation = useMutation({
+    mutationFn: (name: string) => createDepartment({ data: { name } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["departments"] }),
+  });
+
   const boards: BoardRow[] = useMemo(() => boardsQuery.data ?? [], [boardsQuery.data]);
   const departments = useMemo(() => departmentsQuery.data ?? [], [departmentsQuery.data]);
 
   const tabBoards = useMemo(() => boards.filter((b) => b.kind === tab), [boards, tab]);
 
   const departmentGroups = useMemo(() => {
-    if (tab !== "ticketing") return [];
     const groups = new Map<string, { id: string; name: string; boards: BoardRow[] }>();
     for (const dept of departments) {
       groups.set(dept.id, { id: dept.id, name: dept.name, boards: [] });
@@ -125,7 +136,7 @@ function BoardsIndexPage() {
       result.push({ id: UNASSIGNED, name: "General / Unassigned", boards: unassigned });
     }
     return result;
-  }, [tab, tabBoards, departments]);
+  }, [tabBoards, departments]);
 
   const visibleGroups =
     departmentFilter === "all"
@@ -155,8 +166,8 @@ function BoardsIndexPage() {
               Work, <em className="italic text-primary">organized</em>.
             </h1>
             <p className="mt-3 text-sm text-muted-foreground max-w-lg">
-              Marketing initiative boards and departmental IT ticket boards — columns, cards, and a
-              shared view everyone works from.
+              Marketing and ticketing boards, organized by department — columns, cards, and a shared
+              view everyone works from.
             </p>
           </div>
 
@@ -169,6 +180,8 @@ function BoardsIndexPage() {
                 departments={departments}
                 defaultKind={tab}
                 onCreate={(draft) => createMutation.mutate(draft)}
+                onCreateDepartment={(name) => createDepartmentMutation.mutateAsync(name)}
+                creatingDepartment={createDepartmentMutation.isPending}
               />
             )}
             <UserMenu user={user} />
@@ -185,7 +198,7 @@ function BoardsIndexPage() {
               { id: "ticketing", label: "Ticketing" },
             ]}
           />
-          {tab === "ticketing" && departmentGroups.length > 1 && (
+          {departmentGroups.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <FilterChip
                 active={departmentFilter === "all"}
@@ -208,23 +221,16 @@ function BoardsIndexPage() {
 
         {boardsQuery.isLoading ? (
           <Panel className="p-10 text-center text-sm text-muted-foreground">Loading boards…</Panel>
-        ) : tab === "marketing" ? (
-          <BoardGrid
-            boards={tabBoards}
-            isAdmin={isAdmin}
-            emptyText="No marketing boards yet. Create one to start tracking campaign work."
-            onDelete={(id, name) => {
-              if (confirm(`Delete "${name}"? This removes all its columns and cards.`)) {
-                deleteMutation.mutate(id);
-              }
-            }}
-          />
         ) : (
           <div className="space-y-10">
             {visibleGroups.map((group) => (
               <section key={group.id}>
                 <div className="mb-4 flex items-center gap-2">
-                  <Ticket className="size-4 text-muted-foreground" strokeWidth={1.5} />
+                  {tab === "marketing" ? (
+                    <Megaphone className="size-4 text-muted-foreground" strokeWidth={1.5} />
+                  ) : (
+                    <Ticket className="size-4 text-muted-foreground" strokeWidth={1.5} />
+                  )}
                   <PanelEyebrow>
                     {group.id === UNASSIGNED ? "No department" : "Department"}
                   </PanelEyebrow>
@@ -237,7 +243,11 @@ function BoardsIndexPage() {
                   <BoardGrid
                     boards={group.boards}
                     isAdmin={isAdmin}
-                    emptyText="No ticket board for this department yet."
+                    emptyText={
+                      tab === "marketing"
+                        ? "No marketing board for this department yet."
+                        : "No ticket board for this department yet."
+                    }
                     onDelete={(id, name) => {
                       if (confirm(`Delete "${name}"? This removes all its columns and cards.`)) {
                         deleteMutation.mutate(id);
@@ -338,6 +348,8 @@ function BoardGrid({
   );
 }
 
+const NEW_DEPARTMENT = "__new__";
+
 function NewBoardDialog({
   open,
   onOpenChange,
@@ -345,6 +357,8 @@ function NewBoardDialog({
   pending,
   departments,
   defaultKind,
+  onCreateDepartment,
+  creatingDepartment,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -358,12 +372,16 @@ function NewBoardDialog({
   pending: boolean;
   departments: { id: string; name: string }[];
   defaultKind: BoardKind;
+  onCreateDepartment: (name: string) => Promise<{ id: string; name: string }>;
+  creatingDepartment: boolean;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<BoardKind>(defaultKind);
   const [departmentId, setDepartmentId] = useState<string>("");
   const [template, setTemplate] = useState<Template>(defaultKind === "ticketing" ? "it" : "basic");
+  const [newDeptMode, setNewDeptMode] = useState(false);
+  const [newDeptName, setNewDeptName] = useState("");
 
   const reset = () => {
     setName("");
@@ -371,6 +389,8 @@ function NewBoardDialog({
     setKind(defaultKind);
     setDepartmentId("");
     setTemplate(defaultKind === "ticketing" ? "it" : "basic");
+    setNewDeptMode(false);
+    setNewDeptName("");
   };
 
   const submit = (e: FormEvent) => {
@@ -381,9 +401,19 @@ function NewBoardDialog({
       description: description.trim() || undefined,
       template,
       kind,
-      departmentId: kind === "ticketing" && departmentId ? departmentId : undefined,
+      departmentId: departmentId || undefined,
     });
     reset();
+  };
+
+  const submitNewDepartment = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = newDeptName.trim();
+    if (!trimmed) return;
+    const created = await onCreateDepartment(trimmed);
+    setDepartmentId(created.id);
+    setNewDeptMode(false);
+    setNewDeptName("");
   };
 
   return (
@@ -427,7 +457,6 @@ function NewBoardDialog({
                   onClick={() => {
                     setKind(opt.id);
                     setTemplate(opt.id === "ticketing" ? "it" : "basic");
-                    if (opt.id === "marketing") setDepartmentId("");
                   }}
                   className={
                     "h-9 inline-flex items-center justify-center gap-1.5 rounded-sm border text-[11px] font-mono uppercase tracking-wider transition-colors " +
@@ -442,11 +471,58 @@ function NewBoardDialog({
               ))}
             </div>
           </Field>
-          {kind === "ticketing" && (
-            <Field label="Department (optional)">
+          <Field label="Department (optional)">
+            {newDeptMode ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  value={newDeptName}
+                  onChange={(e) => setNewDeptName(e.target.value)}
+                  placeholder="e.g. Merchandising"
+                  className={fieldClass}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      submitNewDepartment(e);
+                    }
+                    if (e.key === "Escape") {
+                      setNewDeptMode(false);
+                      setNewDeptName("");
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={creatingDepartment || !newDeptName.trim()}
+                  onClick={submitNewDepartment}
+                  className="size-9 shrink-0 grid place-items-center rounded-sm bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  aria-label="Create department"
+                >
+                  <Check className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewDeptMode(false);
+                    setNewDeptName("");
+                  }}
+                  className="size-9 shrink-0 grid place-items-center rounded-sm text-muted-foreground hover:text-foreground"
+                  aria-label="Cancel"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            ) : (
               <select
                 value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === NEW_DEPARTMENT) {
+                    setNewDeptMode(true);
+                    setNewDeptName("");
+                  } else {
+                    setDepartmentId(e.target.value);
+                  }
+                }}
                 className={fieldClass}
               >
                 <option value="">No department (general)</option>
@@ -455,12 +531,14 @@ function NewBoardDialog({
                     {d.name}
                   </option>
                 ))}
+                <option value={NEW_DEPARTMENT}>+ Create new department…</option>
               </select>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Each department can have its own ticket board, or leave this general.
-              </p>
-            </Field>
-          )}
+            )}
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Marketing, IT, Merchandising — each department can have its own board, or leave this
+              general.
+            </p>
+          </Field>
           <Field label="Name">
             <input
               value={name}
