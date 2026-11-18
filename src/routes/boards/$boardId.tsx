@@ -1,12 +1,13 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowLeft, MoreHorizontal, Plus, Send, Trash2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -184,6 +185,7 @@ function BoardDetailPage() {
   }
 
   const activeCard = allCards.find((c) => c.id === activeCardId) ?? null;
+  const addCardColumn = columns.find((c) => c.id === addCardColumnId) ?? null;
 
   if (boardQuery.isError) {
     return (
@@ -254,13 +256,7 @@ function BoardDetailPage() {
                       : `Delete "${col.name}"?`;
                   if (confirm(msg)) deleteColumnMutation.mutate(col.id);
                 }}
-                addCardOpen={addCardColumnId === col.id}
                 onOpenAddCard={() => setAddCardColumnId(col.id)}
-                onCloseAddCard={() => setAddCardColumnId(null)}
-                onSubmitAddCard={(title, comment) =>
-                  createCardMutation.mutate({ columnId: col.id, title, comment })
-                }
-                addCardPending={createCardMutation.isPending}
               />
             ))}
 
@@ -286,6 +282,19 @@ function BoardDetailPage() {
           onClose={() => setActiveCardId(null)}
         />
       )}
+
+      {addCardColumn && (
+        <AddCardDialog
+          columnName={addCardColumn.name}
+          onOpenChange={(v) => {
+            if (!v) setAddCardColumnId(null);
+          }}
+          onSubmit={(title, comment) =>
+            createCardMutation.mutate({ columnId: addCardColumn.id, title, comment })
+          }
+          pending={createCardMutation.isPending}
+        />
+      )}
     </div>
   );
 }
@@ -300,11 +309,7 @@ function Column({
   onOpenCard,
   onRename,
   onDelete,
-  addCardOpen,
   onOpenAddCard,
-  onCloseAddCard,
-  onSubmitAddCard,
-  addCardPending,
 }: {
   column: BoardColumn;
   columns: BoardColumn[];
@@ -315,36 +320,17 @@ function Column({
   onOpenCard: (id: string) => void;
   onRename: (name: string) => void;
   onDelete: () => void;
-  addCardOpen: boolean;
   onOpenAddCard: () => void;
-  onCloseAddCard: () => void;
-  onSubmitAddCard: (title: string, comment?: string) => void;
-  addCardPending: boolean;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(column.name);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [comment, setComment] = useState("");
-  const addInputRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (addCardOpen) addInputRef.current?.focus();
-  }, [addCardOpen]);
 
   const submitName = () => {
     setEditingName(false);
     const trimmed = nameDraft.trim();
     if (trimmed && trimmed !== column.name) onRename(trimmed);
     else setNameDraft(column.name);
-  };
-
-  const submitAddCard = (e: FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-    onSubmitAddCard(title.trim(), comment.trim() || undefined);
-    setTitle("");
-    setComment("");
   };
 
   return (
@@ -420,58 +406,12 @@ function Column({
       </div>
 
       <div className="px-2 pb-2">
-        {addCardOpen ? (
-          <form onSubmit={submitAddCard} className="space-y-1.5">
-            <textarea
-              ref={addInputRef}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitAddCard(e);
-                }
-                if (e.key === "Escape") onCloseAddCard();
-              }}
-              placeholder="Ticket title…"
-              rows={2}
-              className="w-full bg-card border border-border-strong rounded-sm px-2.5 py-2 text-[13px] resize-none focus:outline-none"
-            />
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") onCloseAddCard();
-              }}
-              placeholder="Add a comment (optional)…"
-              rows={2}
-              className="w-full bg-card border border-border rounded-sm px-2.5 py-2 text-[13px] resize-none focus:outline-none focus:border-border-strong"
-            />
-            <div className="flex items-center gap-2">
-              <button
-                type="submit"
-                disabled={addCardPending}
-                className="h-7 px-3 text-[11px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
-              >
-                Add
-              </button>
-              <button
-                type="button"
-                onClick={onCloseAddCard}
-                className="size-7 grid place-items-center rounded-sm text-muted-foreground hover:text-foreground"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          </form>
-        ) : (
-          <button
-            onClick={onOpenAddCard}
-            className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-2 rounded-sm"
-          >
-            <Plus className="size-3.5" /> Add a card
-          </button>
-        )}
+        <button
+          onClick={onOpenAddCard}
+          className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-2 rounded-sm"
+        >
+          <Plus className="size-3.5" /> Add a card
+        </button>
       </div>
     </div>
   );
@@ -603,6 +543,79 @@ function AddColumn({
         </button>
       </div>
     </form>
+  );
+}
+
+function AddCardDialog({
+  columnName,
+  onOpenChange,
+  onSubmit,
+  pending,
+}: {
+  columnName: string;
+  onOpenChange: (v: boolean) => void;
+  onSubmit: (title: string, comment?: string) => void;
+  pending: boolean;
+}) {
+  const [title, setTitle] = useState("");
+  const [comment, setComment] = useState("");
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    onSubmit(title.trim(), comment.trim() || undefined);
+  };
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl tracking-tight font-normal">
+            New card
+          </DialogTitle>
+          <DialogDescription>
+            Adding to <span className="text-foreground">{columnName}</span>. Assignee, priority, and
+            due date can be set after it's created.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <FieldBlock label="Title">
+            <textarea
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit(e);
+                }
+              }}
+              placeholder="Ticket title…"
+              rows={2}
+              className="w-full bg-surface border border-border rounded-sm px-3 py-2 text-[13px] resize-none focus:outline-none focus:border-border-strong"
+            />
+          </FieldBlock>
+          <FieldBlock label="Comment (optional)">
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Add a comment…"
+              rows={3}
+              className="w-full bg-surface border border-border rounded-sm px-3 py-2 text-[13px] resize-none focus:outline-none focus:border-border-strong"
+            />
+          </FieldBlock>
+          <DialogFooter>
+            <button
+              type="submit"
+              disabled={pending || !title.trim()}
+              className="h-9 px-4 text-[12px] font-mono uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
+            >
+              {pending ? "Creating…" : "Create card"}
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
