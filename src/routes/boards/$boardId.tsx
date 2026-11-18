@@ -120,8 +120,10 @@ function BoardDetailPage() {
     onSuccess: invalidateBoard,
   });
   const createCardMutation = useMutation({
-    mutationFn: (input: { columnId: string; title: string }) =>
-      createCard({ data: { boardId, columnId: input.columnId, title: input.title } }),
+    mutationFn: (input: { columnId: string; title: string; comment?: string }) =>
+      createCard({
+        data: { boardId, columnId: input.columnId, title: input.title, comment: input.comment },
+      }),
     onSuccess: () => {
       invalidateBoard();
       setAddCardColumnId(null);
@@ -255,7 +257,9 @@ function BoardDetailPage() {
                 addCardOpen={addCardColumnId === col.id}
                 onOpenAddCard={() => setAddCardColumnId(col.id)}
                 onCloseAddCard={() => setAddCardColumnId(null)}
-                onSubmitAddCard={(title) => createCardMutation.mutate({ columnId: col.id, title })}
+                onSubmitAddCard={(title, comment) =>
+                  createCardMutation.mutate({ columnId: col.id, title, comment })
+                }
                 addCardPending={createCardMutation.isPending}
               />
             ))}
@@ -314,13 +318,14 @@ function Column({
   addCardOpen: boolean;
   onOpenAddCard: () => void;
   onCloseAddCard: () => void;
-  onSubmitAddCard: (title: string) => void;
+  onSubmitAddCard: (title: string, comment?: string) => void;
   addCardPending: boolean;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(column.name);
   const [menuOpen, setMenuOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [comment, setComment] = useState("");
   const addInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -337,8 +342,9 @@ function Column({
   const submitAddCard = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    onSubmitAddCard(title.trim());
+    onSubmitAddCard(title.trim(), comment.trim() || undefined);
     setTitle("");
+    setComment("");
   };
 
   return (
@@ -430,6 +436,16 @@ function Column({
               placeholder="Ticket title…"
               rows={2}
               className="w-full bg-card border border-border-strong rounded-sm px-2.5 py-2 text-[13px] resize-none focus:outline-none"
+            />
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") onCloseAddCard();
+              }}
+              placeholder="Add a comment (optional)…"
+              rows={2}
+              className="w-full bg-card border border-border rounded-sm px-2.5 py-2 text-[13px] resize-none focus:outline-none focus:border-border-strong"
             />
             <div className="flex items-center gap-2">
               <button

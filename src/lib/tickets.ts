@@ -183,11 +183,12 @@ export const createCardFn = createServerFn({ method: "POST" })
       assigneeId: uuid.optional(),
       priority: priority.optional(),
       dueDate: z.string().optional(),
+      comment: z.string().max(2000).optional(),
     }),
   )
   .handler(async ({ data }) => {
-    requireEmployee(await session());
-    return svc.createCard(data);
+    const actor = requireEmployee(await session());
+    return svc.createCard({ ...data, employeeId: actor.id });
   });
 
 export const updateCardFn = createServerFn({ method: "POST" })

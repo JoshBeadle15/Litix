@@ -186,6 +186,8 @@ export async function createCard(input: {
   assigneeId?: string;
   priority?: Priority;
   dueDate?: string;
+  comment?: string;
+  employeeId?: string;
 }) {
   const existing = await db
     .select({ position: cards.position })
@@ -210,6 +212,16 @@ export async function createCard(input: {
   await db
     .insert(cardActivity)
     .values({ cardId: card.id, type: "system", message: "Ticket created" });
+
+  if (input.comment?.trim()) {
+    await db.insert(cardActivity).values({
+      cardId: card.id,
+      employeeId: input.employeeId,
+      type: "comment",
+      message: input.comment.trim(),
+    });
+  }
+
   return card;
 }
 
