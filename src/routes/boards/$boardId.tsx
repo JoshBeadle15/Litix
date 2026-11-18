@@ -505,19 +505,23 @@ function Card({
         </div>
       )}
       {columns.length > 1 && (
-        <select
-          value={card.columnId}
-          disabled={moving}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => onMove(e.target.value)}
-          className="mt-2.5 w-full bg-surface border border-border rounded-sm px-2 h-7 text-[11px] focus:outline-none focus:border-border-strong disabled:opacity-50"
-        >
-          {columns.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
+          <span className="block mb-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+            Move to
+          </span>
+          <select
+            value={card.columnId}
+            disabled={moving}
+            onChange={(e) => onMove(e.target.value)}
+            className="w-full bg-surface border border-border rounded-sm px-2 h-7 text-[11px] focus:outline-none focus:border-border-strong disabled:opacity-50"
+          >
+            {columns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
     </div>
   );
