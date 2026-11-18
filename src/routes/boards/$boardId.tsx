@@ -74,8 +74,6 @@ interface BoardDetail {
   cards: BoardCard[];
 }
 
-type DropTarget = { columnId: string; index: number };
-
 const EMPTY_COLUMNS: BoardColumn[] = [];
 const EMPTY_CARDS: BoardCard[] = [];
 
@@ -103,9 +101,6 @@ function BoardDetailPage() {
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [addCardColumnId, setAddCardColumnId] = useState<string | null>(null);
   const [addColumnOpen, setAddColumnOpen] = useState(false);
-
-  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
   const invalidateBoard = () => queryClient.invalidateQueries({ queryKey: ["board", boardId] });
 
@@ -178,28 +173,12 @@ function BoardDetailPage() {
     return map;
   }, [columns, allCards]);
 
-  function handleDrop(columnId: string) {
-    if (!draggingCardId || !dropTarget || dropTarget.columnId !== columnId) {
-      setDraggingCardId(null);
-      setDropTarget(null);
-      return;
-    }
-    const withDragged = cardsByColumn.get(columnId) ?? [];
-    const originalIndex = withDragged.findIndex((c) => c.id === draggingCardId);
-    let insertIndex = dropTarget.index;
-    if (originalIndex !== -1 && originalIndex < insertIndex) insertIndex -= 1;
-
-    const destIds = withDragged.filter((c) => c.id !== draggingCardId).map((c) => c.id);
-    insertIndex = Math.min(Math.max(insertIndex, 0), destIds.length);
-    destIds.splice(insertIndex, 0, draggingCardId);
-
-    moveCardMutation.mutate({
-      cardId: draggingCardId,
-      toColumnId: columnId,
-      orderedCardIds: destIds,
-    });
-    setDraggingCardId(null);
-    setDropTarget(null);
+  function handleMoveCard(cardId: string, toColumnId: string) {
+    const destIds = (cardsByColumn.get(toColumnId) ?? [])
+      .filter((c) => c.id !== cardId)
+      .map((c) => c.id);
+    destIds.push(cardId);
+    moveCardMutation.mutate({ cardId, toColumnId, orderedCardIds: destIds });
   }
 
   const activeCard = allCards.find((c) => c.id === activeCardId) ?? null;
@@ -256,25 +235,13 @@ function BoardDetailPage() {
               <Column
                 key={col.id}
                 column={col}
+                columns={columns}
                 cards={cardsByColumn.get(col.id) ?? []}
                 isAdmin={isAdmin}
-                draggingCardId={draggingCardId}
-                dropTarget={dropTarget}
-                onDragOverCard={(index) => setDropTarget({ columnId: col.id, index })}
-                onDragOverEnd={() =>
-                  setDropTarget((prev) =>
-                    prev?.columnId === col.id &&
-                    prev.index === (cardsByColumn.get(col.id)?.length ?? 0)
-                      ? prev
-                      : { columnId: col.id, index: cardsByColumn.get(col.id)?.length ?? 0 },
-                  )
+                onMoveCard={handleMoveCard}
+                movingCardId={
+                  moveCardMutation.isPending ? moveCardMutation.variables?.cardId : undefined
                 }
-                onDrop={() => handleDrop(col.id)}
-                onDragStartCard={setDraggingCardId}
-                onDragEndCard={() => {
-                  setDraggingCardId(null);
-                  setDropTarget(null);
-                }}
                 onOpenCard={setActiveCardId}
                 onRename={(name) => renameColumnMutation.mutate({ columnId: col.id, name })}
                 onDelete={() => {
@@ -321,15 +288,11 @@ function BoardDetailPage() {
 
 function Column({
   column,
+  columns,
   cards,
   isAdmin,
-  draggingCardId,
-  dropTarget,
-  onDragOverCard,
-  onDragOverEnd,
-  onDrop,
-  onDragStartCard,
-  onDragEndCard,
+  onMoveCard,
+  movingCardId,
   onOpenCard,
   onRename,
   onDelete,
@@ -340,15 +303,11 @@ function Column({
   addCardPending,
 }: {
   column: BoardColumn;
+  columns: BoardColumn[];
   cards: BoardCard[];
   isAdmin: boolean;
-  draggingCardId: string | null;
-  dropTarget: DropTarget | null;
-  onDragOverCard: (index: number) => void;
-  onDragOverEnd: () => void;
-  onDrop: () => void;
-  onDragStartCard: (id: string) => void;
-  onDragEndCard: () => void;
+  onMoveCard: (cardId: string, toColumnId: string) => void;
+  movingCardId: string | undefined;
   onOpenCard: (id: string) => void;
   onRename: (name: string) => void;
   onDelete: () => void;
@@ -368,9 +327,6 @@ function Column({
     if (addCardOpen) addInputRef.current?.focus();
   }, [addCardOpen]);
 
-  const showIndicatorAt = (index: number) =>
-    draggingCardId && dropTarget?.columnId === column.id && dropTarget.index === index;
-
   const submitName = () => {
     setEditingName(false);
     const trimmed = nameDraft.trim();
@@ -386,18 +342,7 @@ function Column({
   };
 
   return (
-    <div
-      className="w-[300px] shrink-0 flex flex-col max-h-full bg-surface border border-border rounded-md"
-      onDragOver={(e) => {
-        if (!draggingCardId) return;
-        e.preventDefault();
-        onDragOverEnd();
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop();
-      }}
-    >
+    <div className="w-[300px] shrink-0 flex flex-col max-h-full bg-surface border border-border rounded-md">
       <div className="px-3 pt-3 pb-2 flex items-center gap-2">
         {editingName && isAdmin ? (
           <input
@@ -456,26 +401,15 @@ function Column({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-[60px]">
-        {showIndicatorAt(0) && <DropIndicator />}
-        {cards.map((card, i) => (
-          <div key={card.id}>
-            <Card
-              card={card}
-              onOpen={() => onOpenCard(card.id)}
-              onDragStart={() => onDragStartCard(card.id)}
-              onDragEnd={onDragEndCard}
-              onDragOver={(e) => {
-                if (!draggingCardId) return;
-                e.preventDefault();
-                e.stopPropagation();
-                const rect = e.currentTarget.getBoundingClientRect();
-                const before = e.clientY < rect.top + rect.height / 2;
-                onDragOverCard(before ? i : i + 1);
-              }}
-              dimmed={draggingCardId === card.id}
-            />
-            {showIndicatorAt(i + 1) && <DropIndicator />}
-          </div>
+        {cards.map((card) => (
+          <Card
+            key={card.id}
+            card={card}
+            columns={columns}
+            onOpen={() => onOpenCard(card.id)}
+            onMove={(toColumnId) => onMoveCard(card.id, toColumnId)}
+            moving={movingCardId === card.id}
+          />
         ))}
       </div>
 
@@ -527,37 +461,29 @@ function Column({
   );
 }
 
-function DropIndicator() {
-  return <div className="h-0.5 my-1 rounded-full bg-primary" />;
-}
-
 function Card({
   card,
+  columns,
   onOpen,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  dimmed,
+  onMove,
+  moving,
 }: {
   card: BoardCard;
+  columns: BoardColumn[];
   onOpen: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  dimmed: boolean;
+  onMove: (toColumnId: string) => void;
+  moving: boolean;
 }) {
   const due = dueMeta(card.dueDate);
   return (
-    <button
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={onDragOver}
+    <div
       onClick={onOpen}
-      className={
-        "w-full text-left mb-2 p-3 bg-card border border-border rounded-sm shadow-[var(--shadow-panel)] hover:border-border-strong cursor-grab active:cursor-grabbing transition-opacity " +
-        (dimmed ? "opacity-30" : "")
-      }
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onOpen();
+      }}
+      className="w-full text-left mb-2 p-3 bg-card border border-border rounded-sm shadow-[var(--shadow-panel)] hover:border-border-strong cursor-pointer"
     >
       <div className="text-[13px] leading-snug">{card.title}</div>
       <div className="mt-2.5 flex items-center justify-between gap-2">
@@ -578,7 +504,22 @@ function Card({
           Due {due.label}
         </div>
       )}
-    </button>
+      {columns.length > 1 && (
+        <select
+          value={card.columnId}
+          disabled={moving}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onMove(e.target.value)}
+          className="mt-2.5 w-full bg-surface border border-border rounded-sm px-2 h-7 text-[11px] focus:outline-none focus:border-border-strong disabled:opacity-50"
+        >
+          {columns.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
   );
 }
 
