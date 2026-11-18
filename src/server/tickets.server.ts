@@ -16,7 +16,6 @@ export async function listBoards() {
       id: boards.id,
       name: boards.name,
       description: boards.description,
-      kind: boards.kind,
       departmentId: boards.departmentId,
       departmentName: departments.name,
       createdAt: boards.createdAt,
@@ -36,7 +35,6 @@ export async function createBoard(input: {
   name: string;
   description?: string;
   template: "it" | "basic" | "blank";
-  kind: "marketing" | "ticketing";
   departmentId?: string;
 }) {
   const [board] = await db
@@ -44,7 +42,6 @@ export async function createBoard(input: {
     .values({
       name: input.name,
       description: input.description,
-      kind: input.kind,
       departmentId: input.departmentId,
     })
     .returning();

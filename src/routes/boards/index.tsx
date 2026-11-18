@@ -3,7 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 import { z } from "zod";
-import { Check, Megaphone, Plus, Ticket, Trash2, Trello, X } from "lucide-react";
+import { Check, Plus, Trash2, Trello, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +31,7 @@ import {
 } from "@/lib/tickets";
 
 const searchSchema = z.object({
-  tab: z.enum(["marketing", "ticketing"]).optional(),
+  tab: z.string().optional(),
 });
 
 export const Route = createFileRoute("/boards/")({
@@ -46,7 +46,7 @@ export const Route = createFileRoute("/boards/")({
       { title: "Boards — MSU Bookstore Analytics" },
       {
         name: "description",
-        content: "Trello-style boards for marketing initiatives and departmental ticketing.",
+        content: "Trello-style boards for each department's work.",
       },
     ],
   }),
@@ -54,24 +54,22 @@ export const Route = createFileRoute("/boards/")({
 });
 
 type Template = "it" | "basic" | "blank";
-type BoardKind = "marketing" | "ticketing";
 
 interface BoardRow {
   id: string;
   name: string;
   description: string | null;
-  kind: BoardKind;
   departmentId: string | null;
   departmentName: string | null;
   cardCount: number;
   createdAt: string | Date;
 }
 
-const UNASSIGNED = "__unassigned__";
+const GENERAL = "__general__";
 
 function BoardsIndexPage() {
   const { user } = Route.useRouteContext();
-  const { tab = "marketing" } = Route.useSearch();
+  const { tab } = Route.useSearch();
   const navigate = Route.useNavigate();
   const isAdmin = user.role === "admin";
   const queryClient = useQueryClient();
@@ -81,7 +79,6 @@ function BoardsIndexPage() {
   const createDepartment = useServerFn(createDepartmentFn);
   const deleteBoard = useServerFn(deleteBoardFn);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [departmentFilter, setDepartmentFilter] = useState<string>("all");
 
   const boardsQuery = useQuery({ queryKey: ["boards"], queryFn: () => listBoards() });
   const departmentsQuery = useQuery({
@@ -94,7 +91,6 @@ function BoardsIndexPage() {
       name: string;
       description?: string;
       template: Template;
-      kind: BoardKind;
       departmentId?: string;
     }) => createBoard({ data: input }),
     onSuccess: () => {
@@ -116,37 +112,27 @@ function BoardsIndexPage() {
   const boards: BoardRow[] = useMemo(() => boardsQuery.data ?? [], [boardsQuery.data]);
   const departments = useMemo(() => departmentsQuery.data ?? [], [departmentsQuery.data]);
 
-  const tabBoards = useMemo(() => boards.filter((b) => b.kind === tab), [boards, tab]);
+  const tabs = useMemo(
+    () => [
+      ...departments.map((d) => ({ id: d.id, label: d.name })),
+      { id: GENERAL, label: "General" },
+    ],
+    [departments],
+  );
 
-  const departmentGroups = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; boards: BoardRow[] }>();
-    for (const dept of departments) {
-      groups.set(dept.id, { id: dept.id, name: dept.name, boards: [] });
-    }
-    const unassigned: BoardRow[] = [];
-    for (const board of tabBoards) {
-      if (board.departmentId && groups.has(board.departmentId)) {
-        groups.get(board.departmentId)!.boards.push(board);
-      } else {
-        unassigned.push(board);
-      }
-    }
-    const result = Array.from(groups.values());
-    if (unassigned.length || result.length === 0) {
-      result.push({ id: UNASSIGNED, name: "General / Unassigned", boards: unassigned });
-    }
-    return result;
-  }, [tabBoards, departments]);
+  const activeTab = tab && tabs.some((t) => t.id === tab) ? tab : (tabs[0]?.id ?? GENERAL);
 
-  const visibleGroups =
-    departmentFilter === "all"
-      ? departmentGroups
-      : departmentGroups.filter((g) => g.id === departmentFilter);
+  const tabBoards = useMemo(
+    () =>
+      boards.filter((b) =>
+        activeTab === GENERAL ? !b.departmentId : b.departmentId === activeTab,
+      ),
+    [boards, activeTab],
+  );
 
-  const setTab = (next: BoardKind) => {
-    setDepartmentFilter("all");
-    navigate({ search: { tab: next } });
-  };
+  const setTab = (next: string) => navigate({ search: { tab: next } });
+
+  const activeDepartmentId = activeTab === GENERAL ? undefined : activeTab;
 
   return (
     <div className="relative">
@@ -166,8 +152,8 @@ function BoardsIndexPage() {
               Work, <em className="italic text-primary">organized</em>.
             </h1>
             <p className="mt-3 text-sm text-muted-foreground max-w-lg">
-              Marketing and ticketing boards, organized by department — columns, cards, and a shared
-              view everyone works from.
+              Every department gets its own board — columns, cards, and a shared view everyone works
+              from.
             </p>
           </div>
 
@@ -178,7 +164,7 @@ function BoardsIndexPage() {
                 onOpenChange={setDialogOpen}
                 pending={createMutation.isPending}
                 departments={departments}
-                defaultKind={tab}
+                defaultDepartmentId={activeDepartmentId}
                 onCreate={(draft) => createMutation.mutate(draft)}
                 onCreateDepartment={(name) => createDepartmentMutation.mutateAsync(name)}
                 creatingDepartment={createDepartmentMutation.isPending}
@@ -188,103 +174,46 @@ function BoardsIndexPage() {
           </div>
         </header>
 
-        <div className="mb-6 flex flex-wrap items-center gap-3 justify-between">
-          <SegmentedControl
-            value={tab}
-            onChange={setTab}
-            layoutGroup="board-kind"
-            options={[
-              { id: "marketing", label: "Marketing" },
-              { id: "ticketing", label: "Ticketing" },
-            ]}
-          />
-          {departmentGroups.length > 1 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <FilterChip
-                active={departmentFilter === "all"}
-                onClick={() => setDepartmentFilter("all")}
-              >
-                All departments
-              </FilterChip>
-              {departmentGroups.map((g) => (
-                <FilterChip
-                  key={g.id}
-                  active={departmentFilter === g.id}
-                  onClick={() => setDepartmentFilter(g.id)}
-                >
-                  {g.name} · {g.boards.length}
-                </FilterChip>
-              ))}
-            </div>
-          )}
-        </div>
+        {tabs.length > 1 && (
+          <div className="mb-6">
+            <SegmentedControl
+              value={activeTab}
+              onChange={setTab}
+              layoutGroup="board-department"
+              wrap
+              options={tabs}
+            />
+          </div>
+        )}
 
         {boardsQuery.isLoading ? (
           <Panel className="p-10 text-center text-sm text-muted-foreground">Loading boards…</Panel>
         ) : (
-          <div className="space-y-10">
-            {visibleGroups.map((group) => (
-              <section key={group.id}>
-                <div className="mb-4 flex items-center gap-2">
-                  {tab === "marketing" ? (
-                    <Megaphone className="size-4 text-muted-foreground" strokeWidth={1.5} />
-                  ) : (
-                    <Ticket className="size-4 text-muted-foreground" strokeWidth={1.5} />
-                  )}
-                  <PanelEyebrow>
-                    {group.id === UNASSIGNED ? "No department" : "Department"}
-                  </PanelEyebrow>
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    · {group.boards.length} board{group.boards.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <PanelTitle>{group.name}</PanelTitle>
-                <div className="mt-4">
-                  <BoardGrid
-                    boards={group.boards}
-                    isAdmin={isAdmin}
-                    emptyText={
-                      tab === "marketing"
-                        ? "No marketing board for this department yet."
-                        : "No ticket board for this department yet."
-                    }
-                    onDelete={(id, name) => {
-                      if (confirm(`Delete "${name}"? This removes all its columns and cards.`)) {
-                        deleteMutation.mutate(id);
-                      }
-                    }}
-                  />
-                </div>
-              </section>
-            ))}
-          </div>
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <Trello className="size-4 text-muted-foreground" strokeWidth={1.5} />
+              <PanelEyebrow>{activeTab === GENERAL ? "No department" : "Department"}</PanelEyebrow>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                · {tabBoards.length} board{tabBoards.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <PanelTitle>{tabs.find((t) => t.id === activeTab)?.label ?? "General"}</PanelTitle>
+            <div className="mt-4">
+              <BoardGrid
+                boards={tabBoards}
+                isAdmin={isAdmin}
+                emptyText="No board for this department yet."
+                onDelete={(id, name) => {
+                  if (confirm(`Delete "${name}"? This removes all its columns and cards.`)) {
+                    deleteMutation.mutate(id);
+                  }
+                }}
+              />
+            </div>
+          </section>
         )}
       </div>
     </div>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        "h-7 px-2.5 rounded-sm font-mono text-[10px] uppercase tracking-wider border transition-colors " +
-        (active
-          ? "border-primary bg-primary/10 text-primary"
-          : "border-border text-muted-foreground hover:text-foreground hover:border-border-strong")
-      }
-    >
-      {children}
-    </button>
   );
 }
 
@@ -309,11 +238,7 @@ function BoardGrid({
           <Link to="/boards/$boardId" params={{ boardId: b.id }} className="block">
             <div className="flex items-center gap-2.5">
               <div className="size-8 rounded-sm bg-surface-2 border border-border grid place-items-center text-primary">
-                {b.kind === "marketing" ? (
-                  <Megaphone className="size-4" strokeWidth={1.5} />
-                ) : (
-                  <Trello className="size-4" strokeWidth={1.5} />
-                )}
+                <Trello className="size-4" strokeWidth={1.5} />
               </div>
               <div className="text-[15px] truncate">{b.name}</div>
             </div>
@@ -356,7 +281,7 @@ function NewBoardDialog({
   onCreate,
   pending,
   departments,
-  defaultKind,
+  defaultDepartmentId,
   onCreateDepartment,
   creatingDepartment,
 }: {
@@ -366,29 +291,26 @@ function NewBoardDialog({
     name: string;
     description?: string;
     template: Template;
-    kind: BoardKind;
     departmentId?: string;
   }) => void;
   pending: boolean;
   departments: { id: string; name: string }[];
-  defaultKind: BoardKind;
+  defaultDepartmentId?: string;
   onCreateDepartment: (name: string) => Promise<{ id: string; name: string }>;
   creatingDepartment: boolean;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [kind, setKind] = useState<BoardKind>(defaultKind);
-  const [departmentId, setDepartmentId] = useState<string>("");
-  const [template, setTemplate] = useState<Template>(defaultKind === "ticketing" ? "it" : "basic");
+  const [departmentId, setDepartmentId] = useState<string>(defaultDepartmentId ?? "");
+  const [template, setTemplate] = useState<Template>("basic");
   const [newDeptMode, setNewDeptMode] = useState(false);
   const [newDeptName, setNewDeptName] = useState("");
 
   const reset = () => {
     setName("");
     setDescription("");
-    setKind(defaultKind);
-    setDepartmentId("");
-    setTemplate(defaultKind === "ticketing" ? "it" : "basic");
+    setDepartmentId(defaultDepartmentId ?? "");
+    setTemplate("basic");
     setNewDeptMode(false);
     setNewDeptName("");
   };
@@ -400,7 +322,6 @@ function NewBoardDialog({
       name: name.trim(),
       description: description.trim() || undefined,
       template,
-      kind,
       departmentId: departmentId || undefined,
     });
     reset();
@@ -422,10 +343,7 @@ function NewBoardDialog({
       onOpenChange={(v) => {
         onOpenChange(v);
         if (!v) reset();
-        else {
-          setKind(defaultKind);
-          setTemplate(defaultKind === "ticketing" ? "it" : "basic");
-        }
+        else setDepartmentId(defaultDepartmentId ?? "");
       }}
     >
       <DialogTrigger asChild>
@@ -439,39 +357,12 @@ function NewBoardDialog({
             Create a board
           </DialogTitle>
           <DialogDescription>
-            Pick a type and starting layout — you can add, rename, or remove columns anytime.
+            Choose a department and starting layout — you can add, rename, or remove columns
+            anytime.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
-          <Field label="Board type">
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  { id: "marketing", label: "Marketing", icon: Megaphone },
-                  { id: "ticketing", label: "Ticketing", icon: Ticket },
-                ] as { id: BoardKind; label: string; icon: typeof Megaphone }[]
-              ).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    setKind(opt.id);
-                    setTemplate(opt.id === "ticketing" ? "it" : "basic");
-                  }}
-                  className={
-                    "h-9 inline-flex items-center justify-center gap-1.5 rounded-sm border text-[11px] font-mono uppercase tracking-wider transition-colors " +
-                    (kind === opt.id
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:text-foreground hover:border-border-strong")
-                  }
-                >
-                  <opt.icon className="size-3.5" strokeWidth={1.5} />
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </Field>
-          <Field label="Department (optional)">
+          <Field label="Department">
             {newDeptMode ? (
               <div className="flex items-center gap-1.5">
                 <input
@@ -535,15 +426,15 @@ function NewBoardDialog({
               </select>
             )}
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Marketing, IT, Merchandising — each department can have its own board, or leave this
-              general.
+              Marketing, IT, Merchandising — each department gets its own tab and board, or leave
+              this general.
             </p>
           </Field>
           <Field label="Name">
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={kind === "ticketing" ? "e.g. Facilities Tickets" : "e.g. Spring Promo"}
+              placeholder="e.g. Facilities Tickets"
               className={fieldClass}
               required
               autoFocus

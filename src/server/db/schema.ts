@@ -4,7 +4,6 @@ import { date, integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-o
 export const priorityEnum = pgEnum("priority", ["low", "medium", "high", "urgent"]);
 export const activityTypeEnum = pgEnum("activity_type", ["comment", "system"]);
 export const roleEnum = pgEnum("role", ["admin", "member"]);
-export const boardKindEnum = pgEnum("board_kind", ["marketing", "ticketing"]);
 
 export const departments = pgTable("departments", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -28,7 +27,6 @@ export const boards = pgTable("boards", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
-  kind: boardKindEnum("kind").notNull().default("ticketing"),
   departmentId: uuid("department_id").references(() => departments.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

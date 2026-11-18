@@ -50,15 +50,22 @@ export function SegmentedControl<T extends string>({
   options,
   small,
   layoutGroup,
+  wrap,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { id: T; label: string }[];
   small?: boolean;
   layoutGroup?: string;
+  wrap?: boolean;
 }) {
   return (
-    <div className="inline-flex border border-border rounded-sm bg-surface p-0.5">
+    <div
+      className={
+        (wrap ? "flex flex-wrap" : "inline-flex") +
+        " border border-border rounded-sm bg-surface p-0.5 gap-0.5"
+      }
+    >
       {options.map((o) => {
         const active = o.id === value;
         return (

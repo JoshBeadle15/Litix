@@ -130,7 +130,6 @@ export const createBoardFn = createServerFn({ method: "POST" })
       name: z.string().min(1).max(80),
       description: z.string().max(280).optional(),
       template: z.enum(["it", "basic", "blank"]),
-      kind: z.enum(["marketing", "ticketing"]),
       departmentId: uuid.optional(),
     }),
   )
